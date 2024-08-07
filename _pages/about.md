@@ -7,6 +7,8 @@ redirect_from:
   - /about.html
 ---
 
-I'm a third year undergraduate student from [Institute of Computing Technology of the Chinese Academy of Sciences, ICT](http://www.ict.ac.cn/), and I will graduate in 2025.
+我是一名研三学生，目前就读于[中国科学院计算技术研究所](http://www.ict.ac.cn/)处理器芯片重点实验室(智能处理器研究中心)，预计2025年毕业。
 
-My research interest includes machine learning system, auto-schedule and auto-tuning in AI Compiler.
+研究生生涯主要研究AI编译器相关的 “自动调度与调优”，对 `machine learning system` 十分感兴趣。
+
+喜欢健身，鼓捣做饭～
