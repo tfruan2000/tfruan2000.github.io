@@ -1,7 +1,7 @@
 ---
 title: Triton Kernel Optim
 author: tfruan
-date: 2024-08-07 20:00:00 +0800
+date: 2024-07-27 20:00:00 +0800
 categories: [Triton]
 tags: [Triton, Kernel Optimization]
 ---
@@ -62,7 +62,7 @@ pytest test_reduction_perf.py::test_perf_layernorm_backward -s
 当前实现功能上基本能cover所有的case，**性能上我也不知道如何，因为我还没在GPU测过hhh**。但还是可以强行优化一下，而且在我的环境下确实有性能提升叻，并且精度测试没问题。
 
 
-## 合并 kernel
+# 合并 kernel
 
 当看到 `kernel` 分为了两个，第一反应是**合并**一下，但是由于 `in_grad`、 `weight_grad` 和 `bias_grad` 的计算行为分别依赖不同的遍历，导致难以合并。
 
@@ -163,7 +163,7 @@ class LayerNorm(torch.autograd.Function):
 
 下节我们将依次解决这两个问题。
 
-## 拆时间片循环
+# 拆时间片循环
 
 将kernel的`grid`按如下设置，保证不超过`grid`的最大限制，其中`MAX_GRID_NUM`是一个人为设置的超参数，根据硬件设置就好。
 
@@ -504,16 +504,45 @@ class LayerNorm(torch.autograd.Function):
         return in_grad, None, weight_grad, bias_grad, None, None
 ```
 
-## 替换算子
+# 替换算子
 
-简单的算子替换:
+## 简单的算子替换
 
 - `tl.max(a, 0.0)` 可以换成 `tl.where(a > 0, a, 0.0)`
 - `x` 和 `y` 在 `tl.load` 时用了mask，随后的 `tl.where(mask, x - y, 0.0)` 可以删除
 - 大规模 `reduce(10000->1)` -> 多级 `reduce(10000->100->1)`
 - ...
 
-算法替换：
+## 人为hint
+
+```python
+offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
+```
+
+由于编译器无法感知数据的连续性，所以加载数据时会**离散地**处理数据。
+如果编写kernel时提前已知数据连续，可以使用 `tl.max_contiguous & tl.multiple_of` 去标识加载数据的连续性，这样编译器就可连续地处理该段数据。
+
+input 和 values 是等维度的
+
+- max_contiguous(input, values)：对于每个维度i，标识input[i]中 每values[i]个相邻元素 是连续的
+
+> 例如 values = [4], 则 input 可以是 [0, 1, 2, 3, 8, 9, 10, 11]
+
+- max_constany(input, values)：对于每个维度i，标识input[i]中 每values[i]个相邻元素 是常数
+
+> 例如 values = [4], 则 input 可以是 [0, 0, 0, 0, 1, 1, 1, 1]
+
+- multiple_of(input, values)：对于每个维度i，标识input[i]中 所有元素都是 values[i] 的倍数
+
+> 例如 values = [2], 则 input 可以是 [0, 2, 4, 6, 8]
+
+```python
+offs_am = tl.max_contiguous(tl.multiple_of((pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M, BLOCK_SIZE_M), BLOCK_SIZE_M)
+offs_am = tl.max_contiguous(tl.multiple_of((pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M, BLOCK_SIZE_M), BLOCK_SIZE_M)
+```
+
+## 算法替换
 
 例如：累乘 -> 二分乘法
 
