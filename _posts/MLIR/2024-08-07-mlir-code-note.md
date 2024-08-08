@@ -1205,11 +1205,7 @@ MLIR中的数据流图是由Operation和Value构成的：（use-def chain）
 
 Operation都包含Results和Operands；Results中包含多个OpResult实例，Operands中包含多个OpOperand实例
 
-<div style="text-align: center;"><img src="./img_MLIR_Note/Untitled.png" alt="Untitled" style="width: 90%;"></div>
-
 - 修改Operand时，实际是修改OpOperand，对应value的use-chain也会被修改
-
-<div style="text-align: center;"><img src="./img_MLIR_Note/Untitled%201.png" alt="Untitled" style="width: 90%;"></div>
 
 ## Operation找Value
 
