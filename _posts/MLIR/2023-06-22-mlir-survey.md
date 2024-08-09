@@ -212,7 +212,7 @@ int dumpMLIR() {
 
 (1) 使用 C++ 语言手动编写
 
-operation 类是继承于 [CRTP]([Curiously recurring template pattern - Wikipedia](https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern)) 类，有一些可选的 traits 来定义行为。下面是 ConstantOp 的官方定义：
+operation 类是继承于 CRTP(Curiously recurring template pattern)类，有一些可选的 traits 来定义行为。下面是 ConstantOp 的官方定义：
 
 ```cpp
 // `mlir::Op` is a CRTP class
