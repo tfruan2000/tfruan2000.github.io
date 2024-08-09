@@ -1,9 +1,9 @@
 ---
-title: Triton Base
+title: Triton Survey
 author: tfruan
 date: 2024-04-11 20:00:00 +0800
 categories: [Triton]
-tags: [Triton]
+tags: [Triton, Survey]
 ---
 
 # background
@@ -18,13 +18,13 @@ tags: [Triton]
 
 cuda和triton编程模式
 
-![cuda_vs_triton](/assets/img/blog/img_triton_base/cuda_vs_triton.png)
+![cuda_vs_triton](/assets/img/blog/img_triton_survey/cuda_vs_triton.png)
 
 
 gpu层次结构图如下
 
 
-![gpu_arch](/assets/img/blog/img_triton_base/gpu_arch.png)
+![gpu_arch](/assets/img/blog/img_triton_survey/gpu_arch.png)
 
 CTA（Cooperative Thread Array）：CTA是一个线程组，由一组线程组成，这些线程可以在GPU上的多个处理器中并行执行。**CTA中的线程可以协同工作，通过共享内存等方式进行通信和协作**。CTA通常是在CUDA编程模型中使用的概念，它是将工作任务划分为较小的线程块以便并行执行的基本单元。
 
@@ -241,7 +241,7 @@ triton是SIMD编程范式，一次处理一片数据（基于block算法的编�
 
 直接对线程块进行编程，每一个操作都是应用在块上，不再控制单个的线程，省去线程之间的同步等操作
 
-![cuda_triton](/assets/img/blog/img_triton_base/cuda_triton.png)
+![cuda_triton](/assets/img/blog/img_triton_survey/cuda_triton.png)
 
 ## block-level control- and data-flow analysis
 
@@ -285,7 +285,7 @@ Triton中关于grid定义：
 
 下面的group-order的行为能获得更好的data-reuse
 
-![layout](/assets/img/blog/img_triton_base/layout.png)
+![layout](/assets/img/blog/img_triton_survey/layout.png)
 
 
 分析：A和B中的内容都是行优先存储，以计算九个数为例，那么原始的一次load需要9+9$\times$9=90次read和9次write。而group order中，一次load需要9$\times$3+3$\times$9=54次read和9次write
@@ -435,7 +435,7 @@ class DistributedEncoding<string name> : TritonGPU_Attr<name> {
 
 Distributed encodings have a layout function that is entirely characterized by a d-dimensional tensor L. Note that L doesn't need to have the same shape (or even the same rank) as the tensor it is encoding.
 
-![distribute_layout](/assets/img/blog/img_triton_base/distribute_layout.png)
+![distribute_layout](/assets/img/blog/img_triton_survey/distribute_layout.png)
 
 ### block layout
 
@@ -443,7 +443,7 @@ An encoding where each warp owns a contiguous portion of the target tensor. This
 
 `#blocked0 = #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [8, 4], warpsPerCTA = [8, 1], order = [1, 0]}>`
 
-<img src="/assets/img/blog/img_triton_base/cta_wrap_thread.png" alt="Untitled" style="zoom:50%;" />
+<img src="/assets/img/blog/img_triton_survey/cta_wrap_thread.png" alt="Untitled" style="zoom:50%;" />
 
 - **sizePerThread = [1, 8]：每个线程处理数据Size**
 - **threadsPerWarp = [8, 4]： warp内线程的布局**
@@ -458,16 +458,16 @@ In order to **avoid shared memory bank conflicts**, elements may be **swizzled
 
 同一个warp内的thread同时访问同一列的数据
 
-![swizzled memory](/assets/img/blog/img_triton_base/swizzled.png)
+![swizzled memory](/assets/img/blog/img_triton_survey/swizzled.png)
 
 ## triton compiler
 
 
-![triton_arch_now](/assets/img/blog/img_triton_base/triton_arch_now.png)
+![triton_arch_now](/assets/img/blog/img_triton_survey/triton_arch_now.png)
 
 compiler支持多后端的方向：通过Linalg dialect
 
-![triton_arch](/assets/img/blog/img_triton_base/triton_arch.png)
+![triton_arch](/assets/img/blog/img_triton_survey/triton_arch.png)
 
 # trick
 

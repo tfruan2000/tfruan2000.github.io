@@ -68,7 +68,7 @@ pytest test_reduction_perf.py::test_perf_layernorm_backward -s
 
 这时候翻看下官方 `tutorial` [layernorm backward](https://github.com/triton-lang/triton/blob/main/python/tutorials/05-layer-norm.py#L275)，虽然也是两个kernel，但是第二个kernel[本质上只做了sum](https://github.com/triton-lang/triton/blob/main/python/tutorials/05-layer-norm.py#L211)，那么我们在第一个kernel中对 `partial_dw` 和 `partial_db` **使用 `atomic_add` 就可以合并为一个kernel**，`atomic_add` 在完成 `add` 后会有 `store` 的行为。
 
-- kernel
+## kernel
 
 优化后的kernel和 `tutorial` 中的实现相似：
 
@@ -113,7 +113,7 @@ def layer_norm_backward_kernel(DX,  # pointer to the input gradient
     tl.atomic_add(DB + cols, partial_db)
 ```
 
-- launch func
+## launch func
 
 ```python
 class LayerNorm(torch.autograd.Function):
@@ -145,11 +145,11 @@ class LayerNorm(torch.autograd.Function):
         bias_grad = bias_grad.to(x.dtype)
 ```
 
-- tuning config
+## tuning config
 
 由于当前kernel没有需要tuning的超参数，所以不需要设置
 
-- 问题分析
+## 问题分析
 
 根据上文的 `launch` 函数可以注意到，当前kernel主要存在以下两个问题：
 
@@ -184,7 +184,7 @@ for row in range(row_start, M, step):
     row_off = row + tl.arange(0, BLOCK_ROW_SIZE)
 ```
 
-- kernel
+## kernel
 
 然后以上一步的kernel为基础，增加拆 `row`（即M）的循环，循环中一次处理 `[BLOCK_ROW_SIZE, BLOCK_COL_SIZE]` 大小的数据：
 
@@ -247,7 +247,7 @@ def layer_norm_backward_kernel(
     tl.atomic_add(DB + cols, db)
 ```
 
-- launch func
+## launch func
 
 backward的launch函数部分也是模仿tutorial写的，人为设置一些超参数
 
@@ -281,7 +281,7 @@ class LayerNorm(torch.autograd.Function):
         bias_grad = bias_grad.to(x.dtype)
 ```
 
-- tuning config
+## tuning config
 
 对 `row` 进行拆分后，我们就需要tuning `BLOCK_ROW_SIZE`，但由于kernel一次还是处理完整的 `col`，所以 `BLOCK_ROW_SIZE` 也不能设置多大。tuning 参数仁者见仁，根据场景做 编译时间和性能的trade-off 就好
 
@@ -306,6 +306,8 @@ def cfggen_bw():
 ```
 
 ---
+
+## 问题分析
 
 让我们回顾下初次优化kernel后提出的两个问题：
 
