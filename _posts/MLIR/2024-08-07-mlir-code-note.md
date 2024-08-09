@@ -6,9 +6,6 @@ categories: [MLIR]
 tags: [MLIR, Code Note]
 ---
 
-> 这只是平时写代码时随手记录的一些笔记，方便自己回顾如何写mlir的代码，一般都在我的github上更新 [github-mlir-note](https://github.com/tfruan2000/mlsys-study-note/blob/main/ai_compiler/MLIR/MLIR_Note.md)
-{: .prompt-info }
-
 # Tools
 
 工欲善其事，必先利其器
