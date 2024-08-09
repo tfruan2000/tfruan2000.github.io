@@ -177,7 +177,7 @@ $$
 p(S) \propto \text{exp} (- \beta \cdot cost(S))
 $$
 
-由当前策略$S$探索到新的策略$S^*$的acceptance criteria，这意味着$cost(S^*)$比$cost(S)$更小时，$S^*$总会被接受，反之也有概率被接受。直观上，MCMC类似gready search，但是可以避免局部最小值。
+由当前策略$S$探索到新的策略 $S^{\*}$ 的acceptance criteria，这意味着$cost(S^{\*})$比$cost(S)$更小时，$S^{\*}$总会被接受，反之也有概率被接受。直观上，MCMC类似gready search，但是可以避免局部最小值。
 
 $$
 \alpha (S \rightarrow S^*) = \text{min}(1, \text{exp}(\beta \cdot (cost(S) - cost(S^*)))
@@ -529,17 +529,17 @@ $T^* = \min\limits_{\{(s_0, Mesh(n_0, m_0)),\dots,(s_S, Mesh(n_S, m_S)\}} \{\sum
 
 故问题可以转化为：
 
-固定$t_{max}=\max_{1\le j \le S}t_j$，最小化$t_{total}(t_{max}) = \sum_{i=1}^{S}t_i$
+固定 $t_{max}=\max_{1\le j \le S}t_j$，最小化$t_{total}(t_{max}) = \sum_{i=1}^{S}t_i$
 
-引入$F(s,k,d|t_{max})$来表示“将算子序列$(o_k, \dots , o_{K})$分配到s stage、使用d个设备运行”的最小耗时
+引入 $F(s,k,d\|t_{max})$ 来表示“将算子序列 $(o_k, \dots , o_{K})$ 分配到s stage、使用d个设备运行”的最小耗时
 
-初始条件 $F(0,K,0|t_{max}) = 0$，F的求解公式如下
+初始条件 $F(0,K,0 \| t_{max}) = 0$，F的求解公式如下
 
 ![F的求解公式](/assets/img/blog/img_auto_parallelism/2024-01-04_17.39.56.png)
 
 $t_{intra}((o_k, \dots , o_i), Mesh(n_s, m_s),s)$来自于intra-op pass的输出，输入为算子序列$(o_k, \dots , o_i)$$(o_k, \dots , o_i)、 Mesh(n_s, m_s)$，其中mesh还需要枚举所有可能$n_l \times m_l = n_s \times m_s$，以获得最优开销。同时选择的策略需要满足内存需求（执行stage、存储中间结果）
 
-最终inter-op pass的问题转化为$T^*(t_{max}) = \min\limits_{s}F(s,0,N\times M|t_{max}) + (B-1)t_{max}$
+最终inter-op pass的问题转化为 $T^{\*} (t_{max}) = \min\limits_{s}F(s,0,N\times M\|t_{max}) + (B-1)t_{max}$
 
 2.优化DP问题复杂度
 
