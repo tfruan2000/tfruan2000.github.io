@@ -4,25 +4,25 @@ icon: fas fa-info-circle
 order: 4
 ---
 
+<!--
+About Me
+====== -->
 
-关于我
+I am a third-year graduate student at the [Institute of Computing Technology, Chinese Academy of Sciences](http://www.ict.ac.cn/), specializing in the [State Key Lab of Processors, SKLP](https://sklp.ict.ac.cn/) (Intelligent Processor Research Center). I am expected to graduate in 2025.
+
+My graduate research mainly focuses on "auto-schedule and auto-tuning" related to AI Compiler, and I have a strong interest in machine learning system.
+
+I really enjoy fitness and cooking.
+
+Education
 ======
 
-我是一名研三学生，目前就读于[中国科学院计算技术研究所](http://www.ict.ac.cn/)处理器芯片重点实验室(智能处理器研究中心)，预计2025年毕业。
+* M.S. Institute of Computing Technology, Chinese Academy of Sciences, ICT, 2022-2025
+* B.S. Xi'an Jiao Tong University, 2018-2022
 
-研究生生涯主要研究AI编译器相关的 “自动调度与调优”，对 `machine learning system` 十分感兴趣。
-
-喜欢健身，喜欢做饭～
-
-教育经历
+Contact
 ======
 
-* M.S. 中国科学院计算技术研究所, 2022-2025
-* B.S. 西安交通大学, 2018-2022
-
-社交账号
-======
-
-* [Github 主页](https://github.com/tfruan2000)
-* [Zhihu 主页](https://www.zhihu.com/people/ruan-ting-feng-59)
+* [Github Page](https://github.com/tfruan2000)
+* [Zhihu Page](https://www.zhihu.com/people/ruan-ting-feng-59)
 * Gmail: ruantingfeng8@gmail.com

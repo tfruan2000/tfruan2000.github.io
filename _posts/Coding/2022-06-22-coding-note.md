@@ -194,6 +194,69 @@ void select_sort(T arr[], const int len){
     }
 }
 ```
+# 搜索与回溯
+
+## 深度优先 DFS
+
+1. LCR 130. 衣橱整理
+
+```cpp
+int dfs(vector<vector<bool>> &visited, int i, int j, int cnt, int m, int n) {
+    auto digit = [](int k) -> int{
+        int res = 0;
+        while (k > 0) {
+            res += k % 10;
+            k = k / 10;
+        }
+        return res;
+    };
+    // 先判断取值是否合法
+    if (i == m || j == n || visited[i][j] || digit(i) + digit(j) > cnt) return false;
+    visited[i][j] = true;
+    return 1 + dfs(visited, i + 1, j, cnt, m, n) + dfs(visited, i, j + 1, cnt, m, n);
+}
+int wardrobeFinishing(int m, int n, int cnt) {
+    vector<bool> tmp(n, false);
+    vector<vector<bool>> visited(m, tmp);
+    // 向前遍历
+    return dfs(visited, 0, 0, cnt, m, n);
+}
+```
+
+## 广度优化 BFS
+
+在树上表现为层序遍历
+
+## 层序遍历
+
+1. LCR 149. 彩灯装饰记录 I
+
+> 用 `queue` 实现层序遍历
+{: .prompt-info }
+
+一棵圣诞树记作根节点为 root 的二叉树，节点值为该位置装饰彩灯的颜色编号。请按照从 左 到 右 的顺序返回每一层彩灯编号。
+
+输入：root = [8,17,21,18,null,null,6]
+输出：[8,17,21,18,6]
+
+```cpp
+vector<int> decorateRecord(TreeNode* root) {
+    if (root == nullptr) return {};
+    vector<int> res;
+    std::queue<TreeNode *> q;
+    q.push(root);
+    while (!q.empty()) {
+        TreeNode* now = q.front();
+        q.pop();
+        if (now != nullptr) {
+            res.push_back(now->val);
+            q.push(now->left);
+            q.push(now->right);
+        }
+    }
+    return res;
+}
+```
 
 # 树
 
@@ -228,9 +291,23 @@ vector<int> decorateRecord(TreeNode* root) {
 }
 ```
 
-# 搜索与图论
+## 递归
 
-# 数学知识
+1. LCR 143. 子结构判断
+
+给定两棵二叉树 tree1 和 tree2，判断 tree2 是否以 tree1 的某个节点为根的子树具有 相同的结构和节点值 。
+
+```cpp
+bool isSame(TreeNode *A, TreeNode *B) {
+    if (B == nullptr) return true;
+    if (A == nullptr) return false;
+    return A->val == B->val && isSame(A->left, B->left) && isSame(A->right, B->right);
+}
+bool isSubStructure(TreeNode* A, TreeNode* B) {
+    if (A == nullptr || B == nullptr) return false;
+    // 判断 以A为根、以A->left为根、以A->right为根
+    return isSame(A, B) || isSubStructure(A->left, B) || isSubStructure(A->right, B);
+```
 
 # 动态规划问题
 
