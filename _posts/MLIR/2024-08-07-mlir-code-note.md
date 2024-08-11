@@ -5072,7 +5072,7 @@ for(int64_t i = 0, index = 0; i < static_cast<int_64>(a.size()); ++i) {
     }
 ```
 
-### 常用reverse来为SmallVector预分配size
+### 常用reserve来为SmallVector预分配size
 
 防止每次压入后动态扩张size带来的开销
 

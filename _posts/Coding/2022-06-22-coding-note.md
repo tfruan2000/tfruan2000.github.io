@@ -8,7 +8,117 @@ tags: [Coding, Algorithm]
 
 [2024/08/10 update]再不刷题，秋招咋办！！
 
-# 基础算法
+# 双指针
+
+## 快慢指针
+
+1. LCR 140. 训练计划 II
+
+给定一个头节点为 head 的链表用于记录一系列核心肌群训练项目编号，请查找并返回倒数第 cnt 个训练项目编号。
+
+> 让快指针比慢指针快 `cnt` 个位即可
+{: .prompt-info }
+
+```cpp
+ListNode* trainingPlan(ListNode* head, int cnt) {
+    ListNode* low = head;
+    ListNode* fast = head;
+    for (int i = 0; i < cnt; ++i)
+        fast = fast->next;
+    while (fast != nullptr) {
+        fast = fast->next;
+        low = low->next;
+    }
+    return low;
+}
+```
+
+## 有序merge
+
+1. LCR 142. 训练计划 IV
+
+> 两个指针一起向前
+{: .prompt-info }
+
+```cpp
+ListNode* trainningPlan(ListNode* l1, ListNode* l2) {
+    if (l1 == nullptr)
+        return l2;
+    if (l2 == nullptr)
+        return l1;
+    ListNode res(-1); // 先初始化一个最小的node
+    ListNode *curr = &res; // 使用指针引用，一边遍历一边修改
+    ListNode *a = l1;
+    ListNode *b = l2;
+    while (a != nullptr && b != nullptr) {
+        if (a->val >= b->val) {
+            curr->next = b;
+            b = b->next;
+        } else {
+            curr->next = a;
+            a = a->next;
+        }
+        curr = curr->next;
+    }
+    while (a != nullptr) {
+        curr->next = a;
+        a = a->next;
+        curr = curr->next;
+    }
+    while (b != nullptr) {
+        curr->next = b;
+        b = b->next;
+        curr = curr->next;
+    }
+    return res.next;
+}
+```
+
+# 栈与队列
+
+## 单调栈
+
+1. LCR 183. 望远镜中最高的海拔
+
+heights[i] 表示对应位置的海拔高度，返回[k, k + limit] 窗口内的 heights[i] 的最大值
+
+```cpp
+vector<int> maxAltitude(vector<int>& heights, int limit) {
+    int n = heights.size();
+    if (limit == 0 || n == 0)
+        return {};
+    if (n == 1)
+        return heights;
+
+    deque<int> q;
+    vector<int> res;
+    res.reserve(n - limit + 1);
+    for (int i = 0; i < limit; ++i) {
+        // 使用 while 一个个出队
+        while (!q.empty() && heights[i] > q.back()) {
+            // 如果 q.back() 大于当前值就不pop
+            // 如果q中只有一个值，说明最大值一直在变
+            q.pop_back();
+        }
+        q.push_back(heights[i]);
+    }
+    res.push_back(q.front());
+    for (int i = limit; i < n; ++i) {
+        while (!q.empty() && heights[i] > q.back()) {
+            q.pop_back();
+        }
+        q.push_back(heights[i]);
+        if (heights[i - limit] == q.front()) {
+            // 当前记录的最大值应该被窗口排出
+            q.pop_front();
+        }
+        res.push_back(q.front());
+    }
+    return res;
+}
+```
+
+# 排序
 
 ## 快排
 
@@ -85,7 +195,38 @@ void select_sort(T arr[], const int len){
 }
 ```
 
-# 数据结构
+# 树
+
+## 层序遍历
+
+1. LCR 149. 彩灯装饰记录 I
+
+> 用 `queue` 实现层序遍历
+{: .prompt-info }
+
+一棵圣诞树记作根节点为 root 的二叉树，节点值为该位置装饰彩灯的颜色编号。请按照从 左 到 右 的顺序返回每一层彩灯编号。
+
+输入：root = [8,17,21,18,null,null,6]
+输出：[8,17,21,18,6]
+
+```cpp
+vector<int> decorateRecord(TreeNode* root) {
+    if (root == nullptr) return {};
+    vector<int> res;
+    std::queue<TreeNode *> q;
+    q.push(root);
+    while (!q.empty()) {
+        TreeNode* now = q.front();
+        q.pop();
+        if (now != nullptr) {
+            res.push_back(now->val);
+            q.push(now->left);
+            q.push(now->right);
+        }
+    }
+    return res;
+}
+```
 
 # 搜索与图论
 
