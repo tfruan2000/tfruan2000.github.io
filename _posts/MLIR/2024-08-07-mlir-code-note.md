@@ -1152,6 +1152,25 @@ void mlir::populateArithToSPIRVPatterns(RewritePatternSet &patterns) {
 } // namespace
 ```
 
+当 `OpRewritePattern` match 的是 template 时
+
+```cpp
+template<class OpTy> // 有些函数要调用时要用 template
+struct XXXPattern : public OpRewritePattern<OpTy> {
+  using OpRewritePattern<OpTy>::OpRewritePattern;
+  LogicalResult matchAndRewrite(OpTy op,
+                                PatternRewriter &rewriter) const override {
+    // 判断是否是想处理的op
+    // 1. 用isa: 此时 isa 中不能放多种，只能一个一个判断
+    if (!llvm::isa<xxx>(Op1) || !llvm::isa<xxx>(Op2))
+      return failure();
+    // 2. 用 std::is_same_v
+    if (!std::is_same_v(OpTy, Op1))
+      return failure();
+  }
+};
+```
+
 2.OpInterfaceRewritePattern
 
 专门匹配某种 `OpInterface` 的pattern。例如
@@ -3677,6 +3696,7 @@ class FoldMaskAccessPattern : public OpRewritePattern<OpTy> {
                                            /*cond*/maskBaseVal.value(),
                                            /*addElseBlock*/true);
 
+    // 下面这种实现是比较危险的，建议使用 getMaskMutable() 来直接将值clear掉
     // Then region.
     auto maskIndex = llvm::find_if(op.getOperand(), [&](Value operandVal) {
         return operandVal == op.getMask(); }) - op.getOperand().begin();
@@ -4548,6 +4568,28 @@ def FuseIntoContainingOp :
 ---
 
 # tensor
+
+tensor 和 memref 是对应的。
+
+对于 ir-on-memref，我们不能轻易改变 ir 的相对位置，例如以下情况，我们不能将 `%load` 直接拷贝到 `scf.forall` 的body中，因为 `%load` 到 `scf.forall` 之间可能存在对 `%alloc` 的写 `def %alloc`。
+
+```text
+%load = memref.load %alloc
+// def %alloc
+scf.forall
+  use %load
+```
+
+但是在 ir-on-tensor 中，这样的 clone 行为是可以的，**因为 tensor 只会有一次定值（自其创建后）**，不会被改变。我们从下面的 ir 的 a、b、c 三个点去获得 `extract` 的值，都是相同的，都是源自于 `%1 = tensor.empty` 创建时获得的随机值。
+
+```text
+%1 = tensor.empty
+%extract = tensor.extract %1 // a 点
+%fill = linalg.fill outs(%1)
+%extract = tensor.extract %1 // b 点
+%map = linalg.map outs(%1)
+%extract = tensor.extract %1 // c 点
+```
 
 ---
 
