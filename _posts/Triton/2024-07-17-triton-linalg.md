@@ -1537,11 +1537,12 @@ if (!type)
   return failure();
 ```
 
-若输入的 `Type` 是 `triton::PointerType` 时，这段代码会将其修改为 `IntegerType(64)`，将指针等同为`i64`类型（后续直接从该i64表示的地址中取数），即
+这个 `TypeConverter` 来源于自定义的 `TritonLinalgTypeConverter`。主要实现：若输入的 `Type` 是 `triton::PointerType` 时，这段代码会将其修改为 `IntegerType(64)`，将指针等同为`i64`类型（后续直接从该i64表示的地址中取数），即
 
 ```bash
 !tt.ptr<f32> -> i64
 !tt.ptr<!tt.ptr<f16>> -> i64
+# 若 RankedTensorType 的 eleType 为 PointerType，则也会将 PointerType 转为 i64
 tensor<256x!tt.ptr<f32>> -> tensor<256xi64>
 ```
 
@@ -1709,7 +1710,7 @@ tt.func @b_ptrs(%b_ptr: !tt.ptr<f16>, %offs_bn: tensor<64xi32>, %stride_bk: i32)
 
 `tt.reduce` 用于 reduce 某一个维度。由于 `linalg.reduce` 的 `init` 也参与运算，所以就需要从 `tt.reduce` 中获得这个 `init`。使用 `arith::getNeutralElement` 去获取 `tt.reduce` 内进行计算的 `payloadOp` 的 `getNeutralElement` 作为 `linalg.fill` 的 fillVal，如果没有，那么则将 `tt.reduce`的第一个值抽出来单独计算作为 init。（因为reduce内的计算可能受初值的影响，所以不能简单地以0为初值）
 
-`TritonReducePattern`算其中比较复杂的conversion，推荐大家阅读下，尤其是`corner case`的处理。
+`TritonReducePattern`算其中比较复杂的conversion，推荐大家阅读下，尤其是`edge case`的处理。
 
 ```text
 %0 = "tt.reduce" (%arg0) ({
@@ -1810,19 +1811,47 @@ tt.precise_sqrt / tt.precise_divf 直接下降到 math.sqrt / math.divf， `tt.m
 
 `tt.histogram` 是表直方图的算子，当前下降用的是比较 naive 的实现，后续应该会增加 `linalg_ext` 的op来承接。
 
-## mask 信息
+## load / store
 
-当 `arith.cmpi` 和 `arith.select` 是用来做计算 mask 时，可以将 `arith.cmpi` 转为 `maxsi + minsi + fill(%true) + pad` 的格式，将 `arith.select` 转为 `tensor.extract_slice + pad` 的格式，直接获取信息。
+由于 tt.load 和 tt.store 的下降 pattern 比较多，所以单独拿出来讲。
 
-TODO...
+在 `triton-linalg/lib/Conversion/TritonToLinalg/LoadStoreConversion.cpp` 中定义了多种情况下的 conversion pattern，根据 pattern benefit 取分开。高 benefit 的 pattern 下降得到的 ir 理论上有更好的 performance。
 
-## ptr
+>
+
+- benefit = 100
+  - TritonContiguousLoadOpConversion, TritonContiguousStoreOpConversion
+  - TritonScalarLoadOpConversion, TritonScalarStoreOpConversion
+
+- benefit = 1
+  - TritonTensorPtrLoadOpConversion, TritonTensorPtrStoreOpConversion
+
+- benefit = 0
+  - TritonScatteredLoadOpConversion, TritonScatteredStoreOpConversion
+
+1.TritonContiguousLoadOpConversion, TritonContiguousStoreOpConversion
+
+首先判断是否是 `TensorPointerType`。
+
+> PointerType 的一些形式：
+> - !tt.ptr<f32>
+> - !tt.ptr<<2xf32>>  这就是 TensorPointerType
+> - !tt.ptr<!tt.ptr<f32>>
+> PointerType 的 getPointeeType 方法会获得 PointerType 内的类型。上面三个分别获得 f32, <2xf32>, !tt.ptr<f32>
+{: .prompt-info }
+
+然后进入 `getPtrInfo` 函数从指针中获得相关信息
+
+### ptr
 
 load : `blockarg` -> `llvm.inttooptr` -> `aux.view` -> `bufferization.to_tensor` -> `tensor`
 
 store : `bufferize.materialize_in_destination` 就是 `copy a tensor`
 
-TODO...
+### mask 信息
+
+当 `arith.cmpi` 和 `arith.select` 是用来做计算 mask 时，可以将 `arith.cmpi` 转为 `maxsi + minsi + fill(%true) + pad` 的格式，将 `arith.select` 转为 `tensor.extract_slice + pad` 的格式，直接获取信息。
+
 
 ## summary
 
