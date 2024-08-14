@@ -223,6 +223,36 @@ int wardrobeFinishing(int m, int n, int cnt) {
 }
 ```
 
+2. LCR 153. 二叉树中和为目标值的路径
+
+给你二叉树的根节点 root 和一个整数目标和 targetSum ，找出所有 从根节点到叶子节点 路径总和等于给定目标和的路径。
+
+```cpp
+vector<int> tmp;
+vector<vector<int>> res;
+// dfs(root, t) = dfs(root->left, t - root->val) + dfs(root->right, t - root->val)
+void dfs(TreeNode *node, int t) {
+    if (node == nullptr)
+        return;
+    // 尝试前进
+    tmp.push_back(node->val);
+    t -= node->val;
+    if (node->left == nullptr && node->right == nullptr && t == 0) {
+        res.push_back(tmp);
+    }
+    dfs(node->left, t);
+    dfs(node->right, t);
+    // 不行就退回
+    tmp.pop_back();
+}
+
+vector<vector<int>> pathTarget(TreeNode* root, int target) {
+    if (root == nullptr) return {};
+    dfs(root, target);
+    return res;
+}
+```
+
 ## 广度优化 BFS
 
 在树上表现为层序遍历
@@ -293,6 +323,8 @@ vector<int> decorateRecord(TreeNode* root) {
 
 ## 递归
 
+### 先序遍历
+
 1. LCR 143. 子结构判断
 
 给定两棵二叉树 tree1 和 tree2，判断 tree2 是否以 tree1 的某个节点为根的子树具有 相同的结构和节点值 。
@@ -307,6 +339,102 @@ bool isSubStructure(TreeNode* A, TreeNode* B) {
     if (A == nullptr || B == nullptr) return false;
     // 判断 以A为根、以A->left为根、以A->right为根
     return isSame(A, B) || isSubStructure(A->left, B) || isSubStructure(A->right, B);
+```
+
+### 中序遍历
+
+1. LCR 155. 将二叉搜索树转化为排序的双向链表
+
+将一个 二叉搜索树 就地转化为一个 已排序的双向循环链表 。
+
+```cpp
+Node *pre;
+Node *firstShit;
+void dfs(Node *curr) {
+    if (curr == nullptr) return;
+    dfs(curr->left);
+    if (pre) {
+        // pre 作为 curr 的左侧
+        curr->left = pre;
+        pre->right = curr;
+    }
+    pre = curr;
+    dfs(curr->right);
+}
+Node* treeToDoublyList(Node* root) {
+    if (root == nullptr) return nullptr;
+    firstShit = root;
+    while (firstShit->left) {
+        firstShit = firstShit->left;
+    }
+    pre = nullptr;
+    dfs(root);
+    // 把头和尾连起来
+    pre->right = firstShit;
+    firstShit->left = pre;
+    return firstShit;
+}
+```
+
+另一种解法：递归，认为 treeToDoublyList 返回一定是有序的
+
+```cpp
+Node* treeToDoublyList(Node* root) {
+    if (root == nullptr) return nullptr;
+    Node *firstShit = root;
+    Node *lastShit = root;
+    // treeToDoublyList 返回的一定是有序的
+    Node *leftN = treeToDoublyList(root->left);
+    Node *rightN = treeToDoublyList(root->right);
+    if (leftN) {
+        // 当前的 firstShit 应该直接接到 leftN 的后面
+        leftN->left->right = firstShit;
+        firstShit->left = leftN->left;
+        firstShit = leftN;
+    }
+    if (rightN) {
+        // 当前的 lastShit 应该直接接到 rightN 的前
+        Node *tmp = rightN->left;
+        lastShit->right = rightN;
+        rightN->left = lastShit;
+        lastShit = tmp;
+    }
+    firstShit->left = lastShit;
+    lastShit->right = firstShit;
+    return firstShit;
+}
+```
+
+2. LCR 174. 寻找二叉搜索树中的目标节点
+
+某公司组织架构以二叉搜索树形式记录，节点值为处于该职位的员工编号。请返回**第 cnt 大**的员工编号。（右根左）
+
+```cpp
+int count = 0;
+int res = 0;
+int findTargetNode(TreeNode* root, int cnt) {
+    dfs(root, cnt);
+    return res;
+}
+void dfs(TreeNode *curr, int cnt) {
+    if (curr == nullptr) return;
+    dfs(curr->right, cnt); // 先往右走到底，再count++
+    ++count;
+    if (count == cnt) res = curr->val;
+    dfs(curr->left, cnt);
+}
+```
+
+如果是返回**第 cnt 小**的员工编号，则是左根右
+
+```cpp
+void dfs(TreeNode *curr, int cnt) {
+    if (curr == nullptr) return;
+    dfs(curr->left, cnt); // 先往左走到底，再count++
+    ++count;
+    if (count == cnt) res = curr->val;
+    dfs(curr->right, cnt);
+}
 ```
 
 # 动态规划问题
