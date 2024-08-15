@@ -1840,17 +1840,62 @@ tt.precise_sqrt / tt.precise_divf 直接下降到 math.sqrt / math.divf， `tt.m
 > PointerType 的 getPointeeType 方法会获得 PointerType 内的类型。上面三个分别获得 f32, <2xf32>, !tt.ptr<f32>
 {: .prompt-info }
 
-然后进入 `getPtrInfo` 函数从指针中获得相关信息
+然后进入 `getPtrInfo` 函数从指针中获得相关信息，接下来进入指针信息分析。
 
 ### ptr
 
-load : `blockarg` -> `llvm.inttooptr` -> `aux.view` -> `bufferization.to_tensor` -> `tensor`
+`PtrInfo` 类主要记录了 offsets, sizes,
 
-store : `bufferize.materialize_in_destination` 就是 `copy a tensor`
+```cpp
+struct PtrInfo {
+  Value memref;
+  SmallVector<OpFoldResult> offsets;
+  SmallVector<OpFoldResult> sizes;
+  SmallVector<DimInfo> dimInfos;
+  SmallVector<int64_t> permutations;
+  bool isMaskTrackerFailed = false;
+};
+```
 
-### mask 信息
+这里的 `DimInfo` 描述了最内维(最低维)的行为。有三种模式，contiguous 、 broadcast以及other。
 
-当 `arith.cmpi` 和 `arith.select` 是用来做计算 mask 时，可以将 `arith.cmpi` 转为 `maxsi + minsi + fill(%true) + pad` 的格式，将 `arith.select` 转为 `tensor.extract_slice + pad` 的格式，直接获取信息。
+- contiguous 表示最低维的数据是连续的，例如`1234..k1234..k1234..k1234..k`，那么这里 contigSize 就是 k
+
+> 这对应着 `tl.max_contiguous`
+> max_contiguous(input, values)：对于每个维度i，标识input[i]中 每values[i]个相邻元素 是连续的
+> 例如 values = [4], 则 input 可以是 [0, 1, 2, 3, 8, 9, 10, 11]
+{: .prompt-info }
+
+- broadcast 表示最低维的数据是broadcast的行为的，例如`1111222233334444...kkkk`，这里的 broadcastSize 就是 4
+
+> 这对应着 `tl.max_constany`
+> max_constany(input, values)：对于每个维度i，标识input[i]中 每values[i]个相邻元素 是常数
+> 例如 values = [4], 则 input 可以是 [0, 0, 0, 0, 1, 1, 1, 1]
+{: .prompt-info }
+
+使用 `tl.max_contiguous & tl.multiple_of` 是为了标识加载时数据的连续性，这样编译器就不会离散得处理这些数据，而是连续得去处理。
+
+```python
+offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+->
+offs_am = tl.max_contiguous(tl.multiple_of((pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M, BLOCK_SIZE_M), BLOCK_SIZE_M)
+```
+
+> multiple_of(input, values)：对于每个维度i，标识input[i]中 所有元素都是 values[i] 的倍数
+> 例如 values = [2], 则 input 可以是 [0, 2, 4, 6, 8]
+{: .prompt-info }
+
+### mask
+
+通过 `MaskTracker` 来分析 load 和 store 时所使用的mask的信息。
+
+```cpp
+MaskTracker maskTracker;
+if (mask) {
+  maskTracker.parse(mask, loc, rewriter);
+```
+
+> 当 `arith.cmpi` 和 `arith.select` 是用来做计算 mask 时，可以将 `arith.cmpi` 转为 `maxsi + minsi + fill(%true) + pad` 的格式，将 `arith.select` 转为 `tensor.extract_slice + pad` 的格式，直接获取信息。
 
 
 ## summary

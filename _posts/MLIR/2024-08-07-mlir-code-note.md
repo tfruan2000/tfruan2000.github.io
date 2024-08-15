@@ -150,7 +150,7 @@ struct AbsOpToMathAbsConverter : public OpConversionPattern<mhlo::AbsOp> {
   using OpConversionPattern<mhlo::AbsOp>::OpConversionPattern;
   LogicalResult
   matchAndRewrite(mhlo::AbsOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const final {
+                  ConversionPatternRewriter &rewriter) const override {
 ...
 
 // OpRewritePattern
@@ -209,10 +209,17 @@ enum class [[nodiscard]] ChangeResult {
 
 ProgramPoint 是一个 `PointerUnion`，可以是 `Operation *, Value, Block *`
 
+ProgramPoint 是 DataFlowAnalysis 中的基石，每次分析都是从一个 point 对象出发，visit 到更多的 point 对象。
+
 3.DataFlowSolver
 
-实现 child data-flow analyses，使用的是 fixed-point iteration 算法。
+实现 child data-flow analyses，使用的是 fixedpoint iteration 算法。
+
 一直维护 `AnalysisState` 和 `ProgramPoint` 信息。
+
+> 在数据流分析中，用来描述数据数据流中信息的变化和融合的是 SemiLattice 理论。例如，在进行活跃性分析时，使用交半格可以跟踪不同数据流中变量活跃性的最小公共集合。参考[数据流分析](https://learn.lianglianglee.com/%E4%B8%93%E6%A0%8F/%E7%BC%96%E8%AF%91%E5%8E%9F%E7%90%86%E4%B9%8B%E7%BE%8E/28%20%E6%95%B0%E6%8D%AE%E6%B5%81%E5%88%86%E6%9E%90%EF%BC%9A%E4%BD%A0%E5%86%99%E7%9A%84%E7%A8%8B%E5%BA%8F%EF%BC%8C%E5%AE%83%E6%9B%B4%E6%87%82.md)
+> 所谓 fixedpoint iteration 算法其实是利用了 SemiLattice 的特性，保证迭代过程中一定存在一个上界，即 fixpoint。
+{: .prompt-info }
 
 数据流分析的流程：
 
@@ -230,7 +237,7 @@ std::unique_ptr<mlir::DataFlowSolver> createDataFlowSolver() {
 }
 ```
 
-(2) 配置并运行分析，直到达到设置的 fix-point
+(2) 配置并运行分析，直到达到设置的 fixpoint
 
 ```cpp
 if (failed(solver->initializeAndRun(root))) {
@@ -238,6 +245,41 @@ if (failed(solver->initializeAndRun(root))) {
   return failure();
 }
 ```
+
+`initializeAndRun` 的代码：
+
+```cpp
+// mlir/lib/Analysis/DataFlowFramework.cpp
+LogicalResult DataFlowSolver::initializeAndRun(Operation *top) {
+  // 加载所有当前context下的 analysis，进行初始化
+  for (DataFlowAnalysis &analysis : llvm::make_pointee_range(childAnalyses)) {
+    DATAFLOW_DEBUG(llvm::dbgs()
+                   << "Priming analysis: " << analysis.debugName << "\n");
+    if (failed(analysis.initialize(top)))
+      return failure();
+  }
+
+  // 一直运行，直到 fixpoint
+  do {
+    while (!worklist.empty()) {
+      auto [point, analysis] = worklist.front();
+      worklist.pop();
+      DATAFLOW_DEBUG(llvm::dbgs() << "Invoking '" << analysis->debugName
+                                  << "' on: " << point << "\n");
+      // 在 visit 过程还会不断地遇到新的符合条件的 point，需要加入 worklist，一直遍历下去，直到到达 fixpoint
+      if (failed(analysis->visit(point)))
+        return failure();
+    }
+
+    // Iterate until all states are in some initialized state and the worklist
+    // is exhausted.
+  } while (!worklist.empty());
+
+  return success();
+}
+```
+
+理论上一定会到达 fixpoint，每个 analysis 都获得一个稳定的 Lattice。如果该过程的时间过慢，说明相关的 analysis 处理 ProgramPoint 的行为存在问题。
 
 (3) 从 solver 中 query analysis state results
 
@@ -1133,6 +1175,8 @@ mlir/include/mlir/IR/PatternMatch.h
 // mlir/lib/Conversion/ArithToSPIRV/ArithToSPIRV.cpp
 // namespace内定义许多op conversion patterns
 namespace{
+// final 跟在类后面，说明该类不能再被继承
+// const 修饰 matchAndRewrite 方法，说明该方法不能改变类的成员变量。
 struct ConstantCompositeOpPattern final
     : public OpConversionPattern<arith::ConstantOp> {
   using OpConversionPattern::OperationConversionPattern;
@@ -3335,6 +3379,12 @@ mlir/include/mlir/IR/Matchers.h
 用来确定输入对象符合某种特性(`Pattern`)
 
 - matchPattern(Value, Pattern)
+
+```cpp
+auto val = getValueOrCreateConstantIndexOp(...)
+if (mathPattern(val, m_Zero())) // 判断 val 是否是立即数0 或 constant(0)
+```
+  - `matchPattern(val, m_Zero())`
 - matchPattern(Operation *, Pattern)
 - matchPattern(Attribute, Pattern)
 
@@ -4039,6 +4089,14 @@ using namespace mlir;
 using namespace mlir::xxxx;
 
 namespace{
+template<class OpTy>
+class XXXXPattern : public OpRewritePattern<OpTy> {
+  using OpRewritePattern<OpTy>::OpRewritePattern;
+  LogicalResult matchAndRewrite(OpTy op,
+                                PatternRewriter &rewriter) const override {
+  }
+}
+
 // 相关代码runOperation()写在匿名空间，匿名空间可以限制标识符的作用域，防止全局空间污染
 struct PassNamePass : public PassNamePassBase<PassNamePass> {
 	// explicit PassNamePass() = default(option-input-type optionName) {

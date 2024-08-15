@@ -1,6 +1,5 @@
 # CPP
 
-CPP
 1.虚函数是加virtual修饰的函数，子类可以直接用或者override。纯虚函数函数最后有=0，子类必须override
 
 2.const inline static define volatile
@@ -21,80 +20,73 @@ volatile让编译器别优化该变量。本来优化后会从寄存器中读，
 
 3.构造函数分为默认、带参、拷贝构造（函数参数、非引用返回、初始化对象）。浅拷贝：没有显示定义拷贝
 
+为了避免浅拷贝时，需要自己写拷贝构造函数。需要把值复制给新的对象，而不是把权限给新对象
+
+函数参数传递对象（值传递）就是浅拷贝
+
+类中有指针（包括虚函数）的情况下，一定需要拷贝构造函数
+
+浅拷贝可能造成double-free
+
 4.move
-直接传给函数是拷贝构造
-先复制临时变量，再把复制内容放到目的内存，回收临时
 
-优化：目的地址指针 和 临时变量地址交换
-销毁临时变量指向的内存。（转移所有权）这就是move
+类作为函数参数时，若直接传递(一般是const &)，则是调用拷贝构造
 
-move强制把左值转变为右值引用，forward就是保持参数传递的左右值特性
+拷贝构造的一般流程：先复制临时变量，再把复制内容放到目的内存，回收临时
 
-处理临时变量用右值引用string &&, 处理普通变量用const引用const string &
+优化：将 目的地址指针 和 临时变量指针  指向直接交换，然后销毁临时变量指向的内存。。这就完成了转移所有权，即move
 
 5.forward
 
-template<typename T1, typename T2>
-void set(T1 && var1, T2 && var2){
-  m_var1 = std::forward<T1>(var1);
-  m_var2 = std::forward<T2>(var2);
-}
+move强制把左值转变为右值引用，forward就是保持参数传递的左右值特性
 
-如果外面传来了rvalue临时变量, 它就转发rvalue并且启用move语义.
+forward处理左值常量引用时，直接copy拷贝构造；处理右值时，直接走move
 
-如果外面传来了lvalue, 它就转发lvalue并且启用复制. 然后它也还能保留const.
-
-理论上forward cover了move的所有情况，但需要额外带一个模版参数T，可读性差点。而且这两者都可以被static_cast替代
-
-forward相当于
-
+```
 void A::set(const T &val)
   m_var = var;  //copy
 
 void A::set(T &&val)
   m_var=move(val)
+```cpp
 
+理论上forward cover了move的所有情况，但需要额外带一个模版参数T(处理临时变量用右值引用`string &&`, 处理普通变量用const引用`const string &`)，可读性差点。而且这两者都可以被static_cast替代
 
 6.多用++i
+
 i++包含 取值、加法、赋值三个操作，在高并发时可能出问题
 
 7.struct和class
+
 struct默认是public，class默认是private
 
-8. explicit
+8.explicit
+
 防止隐式转换和复制初始化
 
 9.构造函数
-带参构造函数（右值、常量左值引用）
-赋值构造
-构造函数不能是虚函数
 
-10.拷贝构造
-为了避免浅拷贝时，需要自己写拷贝构造函数。需要把值复制给新的对象，而不是把权限给新对象
-函数参数传递对象（值传递）就是浅拷贝
-类中有指针（包括虚函数）的情况下，一定需要拷贝构造函数
-浅拷贝可能造成double-free
+带参构造函数（右值、常量左值引用）
+
+赋值构造
+
+构造函数不能是虚函数
 
 11.菱形继承问题：virtual public
 
-
 # arch
-
-arch note
 
 barrier是核间的，sync是核内的
 
 workgroup其实是onencl的术语，对应cuda就是逻辑上的block
 
-一个kernel有一个grid
-一个grid有多个block
-一个block有多个thread（按warp）分组
+一个kernel有一个grid，一个grid有多个block，一个block有多个thread（按warp）分组
 
-每个Grid可以最多创建65535个block
-每个Block最多512个thread
+每个Grid可以最多创建65535个block，每个Block最多512个thread
 
 访问层次上，thread操作register，block操作share memory，grid操作global ram
-一个block内的所有thread通过share memory来交换数据。不同block之间的thread是无法通信的
+
+一个block内的所有thread通过share memory（这个share mem 就是负责该block的L1 Cache）来交换数据。不同block之间的thread是无法通信的
 
 （但新架构上，block之间可以共用一片shared mem）
 
@@ -109,19 +101,22 @@ workgroup其实是onencl的术语，对应cuda就是逻辑上的block
 一个SM 可以处理多个线程块block，当其中有block 的所有thread 都处理完后，他就会再去找其他还没处理的block 来处理。
 
 thread block cluster
-CUDA的设备在实际执行过程中，会以block为单位。每个block可以使用的share memory有限，导致任务规模大时要用global memory
 
-如果block配置线程数较多，会导致kernel只发射少量block，而很多sm闲置。以block为粒度来处理任务阻碍运行效率，需要提供更大粒度的线程组
+一个Block的Thread配较少时->执行慢
+一个Block的Thread配较多时->SM利用率低，且block可使用的smem有限，当负责的任务规模较大时，则需要使用gdram，使得IO成为瓶颈
+
+以block为粒度来处理任务阻碍运行效率，需要提供更大粒度的线程组
 
 thread block cluster是更大粒度的线程组，其中的线程组可以访问分布在不同block的smem，这些smem称为 distributed smem
 
-smem其实就是SM的L1Cache，这是SM私有（L2 Cache是共用的）。但若hread block cluster的block在多个SM上运行，就需要特殊的结构实现SM的smem共享。
+smem其实就是SM的L1Cache，这是SM私有（L2 Cache是共用的）。但若thread block cluster的block在多个SM上运行，就需要特殊的结构实现SM的smem共享。
 
 Hopper在L1和L2之间加了SM-2-SM Network，实现SM1可以访问SM2的L1 Cache
 
 # MLIR
 
 1. SmallVectorImpl
+
 写一个以SmallVector为参数的函数，如果传入的元素个数是固定的，建议使用`SmallVectorImpl` 作为形参，来避免**对堆栈元素的隐式数量进行硬编码**。因为 SmallVector有一个参数N表示元素个数，直接使用SmallVectorImpl能避免该行参的拷贝
 
 2.  triton通过Layout来表征Thread对数据的访问模式，信息通过layout这种attr往下传递，指导下降
