@@ -20,9 +20,7 @@ cuda和triton编程模式
 
 ![cuda_vs_triton](/assets/img/blog/img_triton_survey/cuda_vs_triton.png)
 
-
 gpu层次结构图如下
-
 
 ![gpu_arch](/assets/img/blog/img_triton_survey/gpu_arch.png)
 
@@ -32,7 +30,6 @@ CTA（Cooperative Thread Array）：CTA是一个线程组，由一组线程组�
 CTA内的线程被划分为一组一组的warp，每个warp中的线程同时执行相同的指令。
 
 CGA（Cooperative Grid Array）：CGA是一种更高级的概念，它是一组CTA的集合，可以在GPU上协同工作。CGA可以用于更大规模的并行计算，将任务划分为多个CTA进行执行，并且CTA之间可以通过全局内存进行通信和同步。
-
 
 # elements
 
@@ -172,7 +169,6 @@ mask 为遮盖，类似decoder Attn中的mask。一是规范访存行为，防�
 
 - rep：每个config的重复时间，默认100ns
 
-
 ```python
 @triton.autotune(
     configs=[
@@ -287,7 +283,6 @@ Triton中关于grid定义：
 
 ![layout](/assets/img/blog/img_triton_survey/layout.png)
 
-
 分析：A和B中的内容都是行优先存储，以计算九个数为例，那么原始的一次load需要9+9$\times$9=90次read和9次write。而group order中，一次load需要9$\times$3+3$\times$9=54次read和9次write
 
 - num_pid_m 和 num_pid_n 就是为来获得矩阵长宽各可以分为多少个block（上图的黄色小块）
@@ -376,7 +371,6 @@ tl.store(c_ptrs, mask=c_mask)
         b_ptrs += BLOCK_SIZE_K * stride_bk
 ```
 
-
 ## num_warp
 
 一般体现在module Attr上，下面的代码意味着这个程序使用4个warp执行（这个参数一般也是 `tl.constexpr`）
@@ -429,6 +423,7 @@ class DistributedEncoding<string name> : TritonGPU_Attr<name> {
 ...
 }
 ```
+
 - **Shared Layout：**GPU中的Shared Memory是可以被一个Block内的任意线程访问的，shared layout会被用来描述哪些元素会被线程同时访问，以此来减少bank confict映射函数被定义为任意Tensor->任意Thread。
 
 ### distributed layout
@@ -461,7 +456,6 @@ In order to **avoid shared memory bank conflicts**, elements may be **swizzled
 ![swizzled memory](/assets/img/blog/img_triton_survey/swizzled.png)
 
 ## triton compiler
-
 
 ![triton_arch_now](/assets/img/blog/img_triton_survey/triton_arch_now.png)
 

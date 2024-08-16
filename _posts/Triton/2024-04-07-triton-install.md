@@ -20,7 +20,7 @@ tags: [Triton, Install]
 conda install pytorch==2.2.1 torchvision==0.17.1 torchaudio==2.2.1 pytorch-cuda=11.8 -c pytorch -c nvidia
 ```
 
-详细见官网：https://pytorch.org/get-started/previous-versions/
+详细见官网：<https://pytorch.org/get-started/previous-versions/>
 
 - 安装常见的包
 
@@ -52,7 +52,6 @@ git clone https://github.com/triton-lang/triton.git
 
 clone llvm 很难搞，如果不用修改源码，就直接安装吧
 
-
 ```bash
 pip install git+https://github.com/LLNL/hatchet
 
@@ -72,7 +71,6 @@ Type "help", "copyright", "credits" or "license" for more information.
 cd triton/python/tutorials/
 python 03-matrix-multiplication.py
 ```
-
 
 # 编译llvm
 

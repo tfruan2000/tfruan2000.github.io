@@ -36,19 +36,21 @@ volatile让编译器别优化该变量。本来优化后会从寄存器中读，
 
 优化：将 目的地址指针 和 临时变量指针  指向直接交换，然后销毁临时变量指向的内存。。这就完成了转移所有权，即move
 
+`T &` -> `T &&`
+
 5.forward
 
 move强制把左值转变为右值引用，forward就是保持参数传递的左右值特性
 
 forward处理左值常量引用时，直接copy拷贝构造；处理右值时，直接走move
 
-```
+```cpp
 void A::set(const T &val)
   m_var = var;  //copy
 
 void A::set(T &&val)
   m_var=move(val)
-```cpp
+```
 
 理论上forward cover了move的所有情况，但需要额外带一个模版参数T(处理临时变量用右值引用`string &&`, 处理普通变量用const引用`const string &`)，可读性差点。而且这两者都可以被static_cast替代
 
@@ -119,8 +121,7 @@ Hopper在L1和L2之间加了SM-2-SM Network，实现SM1可以访问SM2的L1 Cach
 
 写一个以SmallVector为参数的函数，如果传入的元素个数是固定的，建议使用`SmallVectorImpl` 作为形参，来避免**对堆栈元素的隐式数量进行硬编码**。因为 SmallVector有一个参数N表示元素个数，直接使用SmallVectorImpl能避免该行参的拷贝
 
-2.  triton通过Layout来表征Thread对数据的访问模式，信息通过layout这种attr往下传递，指导下降
-
+2. triton通过Layout来表征Thread对数据的访问模式，信息通过layout这种attr往下传递，指导下降
 
 3. MLIR提供了两个tablegen模块，即：ODS和DRR。
 ODS：统一Dialect，Operation等Dialect内部类的创建；DRR：统一Canonicalization, Transformation和Conversion的创建，即PatternRewritter的管理（除此之外，也提供对Pass的管理）。

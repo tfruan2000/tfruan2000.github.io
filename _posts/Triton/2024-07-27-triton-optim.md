@@ -61,7 +61,6 @@ pytest test_reduction_perf.py::test_perf_layernorm_backward -s
 
 当前实现功能上基本能cover所有的case，**性能上我也不知道如何，因为我还没在GPU测过hhh**。但还是可以强行优化一下，而且在我的环境下确实有性能提升叻，并且精度测试没问题。
 
-
 # 合并 kernel
 
 当看到 `kernel` 分为了两个，第一反应是**合并**一下，但是由于 `in_grad`、 `weight_grad` 和 `bias_grad` 的计算行为分别依赖不同的遍历，导致难以合并。
@@ -683,7 +682,6 @@ def prod_kernel_mid(
     mid_ptr = mid + pid
     tl.store(mid_ptr + pid, mid_value.to(inp_val.dtype))
 ```
-
 
 ---
 

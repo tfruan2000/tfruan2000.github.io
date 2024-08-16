@@ -47,8 +47,8 @@ AI编译器可以涉及的两种切图：
 
 - 数据并行
 - 模型并行
-    - 算子内并行：即张量并行，可以横向/纵向切分
-    - 算子间并行
+  - 算子内并行：即张量并行，可以横向/纵向切分
+  - 算子间并行
 - 流水并行：可以认为是算子间并行的一种特殊情况（每次只执行一个micro-batch）
 - 混合并行：可以看看DeepSpeed
 
@@ -56,11 +56,11 @@ AI编译器可以涉及的两种切图：
 
 | Name | Description | Organization or author | Paper | Framework | Year | Auto Methods |
 | --- | --- | --- | --- | --- | --- | --- |
-| FlexFlow | A deep learning framework that accelerates distributed DNN training by automatically searching for efficient parallelization strategies | Zhihao Jia | https://arxiv.org/abs/1807.05358 | FlexFlow, compatible with PyTorch, Keras | 2019 | MCMC search algorithm |
-| Auto-MAP | It works on HLO IR. Use Linkage Group to prune search space Use DQN RL to search DD, MP, PP stategies. | Alibaba | https://arxiv.org/abs/2007.04069 | RAINBOW DQN | 2020 | Reinforce Learning |
-| GSPMD | A system that uses simple tensor sharding annotations to achieve different parallelism paradigms in a unified way | Google | https://arxiv.org/abs/2105.04663 | Tensorflow XLA | 2021 | sharding propagation |
-| Alpa | Automating Inter- and Intra-Operator Parallelism for Distributed Deep Learning | UC Berkley, Google, etc. | https://arxiv.org/abs/2201.12023 | Jax, XLA | 2022 | Integer Linear for Intra, Dynamic programming for inter |
-| TePDist | It works on HLO IR. Given hierarchical disassembly of the search space of the SPMD strategy. | Alibaba | https://arxiv.org/abs/2302.08141 | Tensorflow XLA | 2023 | three levels of granularity: cone(DP), segment(ILP), graph(DP) pipeline stage: ILP |
+| FlexFlow | A deep learning framework that accelerates distributed DNN training by automatically searching for efficient parallelization strategies | Zhihao Jia | <https://arxiv.org/abs/1807.05358> | FlexFlow, compatible with PyTorch, Keras | 2019 | MCMC search algorithm |
+| Auto-MAP | It works on HLO IR. Use Linkage Group to prune search space Use DQN RL to search DD, MP, PP stategies. | Alibaba | <https://arxiv.org/abs/2007.04069> | RAINBOW DQN | 2020 | Reinforce Learning |
+| GSPMD | A system that uses simple tensor sharding annotations to achieve different parallelism paradigms in a unified way | Google | <https://arxiv.org/abs/2105.04663> | Tensorflow XLA | 2021 | sharding propagation |
+| Alpa | Automating Inter- and Intra-Operator Parallelism for Distributed Deep Learning | UC Berkley, Google, etc. | <https://arxiv.org/abs/2201.12023> | Jax, XLA | 2022 | Integer Linear for Intra, Dynamic programming for inter |
+| TePDist | It works on HLO IR. Given hierarchical disassembly of the search space of the SPMD strategy. | Alibaba | <https://arxiv.org/abs/2302.08141> | Tensorflow XLA | 2023 | three levels of granularity: cone(DP), segment(ILP), graph(DP) pipeline stage: ILP |
 
 # FlexFlow
 
@@ -71,23 +71,23 @@ repo： [https://github.com/flexflow/FlexFlow/tree/inference](https://github.com
 ## 概述
 
 - 区别于传统的data parallel 、model parallel（本文没涉及pipeline paralle）的划分维度，FlexFlow将并行策略的划分维度分为SOAP(Sample-Operation-Attribute-Parameter)
-    - Sample: 输入样本的batch_size
-    - Operation: op之间的划分维度，算子间并行
-    - Attribute: tensor的属性维度（除parameter之外的维度），即height和width
-    - Parameter: tensor的parameter维，即channel_in和channel_out
+  - Sample: 输入样本的batch_size
+  - Operation: op之间的划分维度，算子间并行
+  - Attribute: tensor的属性维度（除parameter之外的维度），即height和width
+  - Parameter: tensor的parameter维，即channel_in和channel_out
 - FlexFlow引入了execution simulator，使用较少的资源衡量且更快地当前并行策略
-    - 使用MCMC搜索算法探索SOAP的空间
-    - 对新策略采用增量计算来评估性能
+  - 使用MCMC搜索算法探索SOAP的空间
+  - 对新策略采用增量计算来评估性能
 
 ## Architecture
 
 - 输入：Opeartor Graph和Device Topology
-    - Opeartor Graph：输入模型的计算图描述
-    - Device Topology：device为节点，设备之间的连接关系（NVLink、PCI-e）为边
+  - Opeartor Graph：输入模型的计算图描述
+  - Device Topology：device为节点，设备之间的连接关系（NVLink、PCI-e）为边
     不同连接→不同带宽、延迟→适用于不同并行策略
 - 获得最优并行策略：Execution Optimizer
-    - MCMC Search Algorithm：基于先前的candidates，迭代地给出新的candidate strategies
-    - Execution Sinulator：衡量当前candidate strategy的性能，避免e2e运行
+  - MCMC Search Algorithm：基于先前的candidates，迭代地给出新的candidate strategies
+  - Execution Sinulator：衡量当前candidate strategy的性能，避免e2e运行
 - Distribute Runtime：资源调度与执行
 
 ![exe](/assets/img/blog/img_auto_parallelism/Untitled.png)
@@ -123,17 +123,17 @@ FlexFlow的并行策略S包含了每个op的并行策略
 假设：
 
 - 每个op的execution time是predicable并且于独立于输入
-    - 用于增量计算。在衡量strategy时，若某个op的input_size和上次执行相同，则直接使用上次执行中的op耗时。在大多数模型中，这个假设成立
+  - 用于增量计算。在衡量strategy时，若某个op的input_size和上次执行相同，则直接使用上次执行中的op耗时。在大多数模型中，这个假设成立
 - 设备之间的通信带宽被充分利用
 - runtime的调度开销忽略不计
 
 1.构建task graph
 
 - 节点：task
-    - normal task：op的计算 t_{i}:{k}
-    - communication task：设备之间的数据传输 t_c
+  - normal task：op的计算 t_{i}:{k}
+  - communication task：设备之间的数据传输 t_c
     （Alpa中考虑了一个resharding开销，当一个op的input_tensor并不满足该op的切分config时，需要引入额外的resharding开销）
-    - 每个task包含以下属性
+  - 每个task包含以下属性
 
 ![task graph](/assets/img/blog/img_auto_parallelism/Untitled%203.png)
 
@@ -261,9 +261,9 @@ propagation过程：
 
 - 当给定某些变量/参数的partition时，将对每条instruction施加推导规则
 - 停止条件
-    - 没有足够信息进行推导
-    - 违反推导规则
-    - 所有变量都被推导
+  - 没有足够信息进行推导
+  - 违反推导规则
+  - 所有变量都被推导
 
 再Auto-MAP中，对每个 可训练变量 的每个 维度（例如NCHW）都要确定partition/replicate
 
@@ -291,8 +291,8 @@ action和reward同OPP，但是state是input size的所有划分维度状态
 
 - 将model划分到多个stage
 - 将划分后到情况放在设备上运行
-    - 按照每个stage的计算比例来分配计算资源
-    - GPU集群中，GPU之间的层级（以链接方式来划分，NVlink/PCI-e等）不同，通信速度也就不同，这适用于不同的任务
+  - 按照每个stage的计算比例来分配计算资源
+  - GPU集群中，GPU之间的层级（以链接方式来划分，NVlink/PCI-e等）不同，通信速度也就不同，这适用于不同的任务
 
 ![划分](/assets/img/blog/img_auto_parallelism/2024-02-24_23.52.54.png)
 
@@ -366,7 +366,7 @@ reading
 
 paper： **[Alpa: Automating Inter- and Intra-Operator Parallelism for Distributed Deep Learning](https://arxiv.org/abs/2201.12023)**
 
-repo：https://github.com/alpa-projects/alpa
+repo：<https://github.com/alpa-projects/alpa>
 
 Alpa: Automating Inter- and Intra-Operator Parallelism for Distributed Deep Learning
 
@@ -467,8 +467,8 @@ $$
 （1）op v执行开销 = $s_v^T(c_v + d_v )$ = 计算开销+通信开销
 
 - 计算开销：所有的op的computation cost均为0
-    - 对于计算开销大的算子（matmul），一定会将tensor拆分给每个设备，所以每个设备的计算开销均等
-    - 对于计算开销小的算子（element-wise），可以忽略
+  - 对于计算开销大的算子（matmul），一定会将tensor拆分给每个设备，所以每个设备的计算开销均等
+  - 对于计算开销小的算子（element-wise），可以忽略
 - 通信开销 = 当前parallel algorithm所需要的通信补偿（查op的parallel algorithm表格）
 
 （2）其他开销 = $s_v^T R_{vu} s_u$
@@ -577,7 +577,6 @@ $T^* = \min\limits_{\{(s_0, Mesh(n_0, m_0)),\dots,(s_S, Mesh(n_S, m_S)\}} \{\sum
 
 ![cross-mesh resharding](/assets/img/blog/img_auto_parallelism/2024-01-04_19.27.19.png)
 
-
 整体架构
 
 ![整体架构](/assets/img/blog/img_auto_parallelism/2024-01-04_19.24.00.png)
@@ -612,7 +611,7 @@ $T^* = \min\limits_{\{(s_0, Mesh(n_0, m_0)),\dots,(s_S, Mesh(n_S, m_S)\}} \{\sum
 
 paper：**[Auto-Parallelizing Large Models with Rhino: A Systematic Approach on Production AI Platform](https://arxiv.org/abs/2302.08141)**
 
-repo：https://github.com/alibaba/TePDist
+repo：<https://github.com/alibaba/TePDist>
 
 ## 概述
 
@@ -633,9 +632,9 @@ pipeline parallelism：将stage划分建模为ILP问题，ILP Solver以总通信
 ## Architecture
 
 - 编译阶段
-    - automatic distributed strategy search
-    - device mesh allocation
-    - TepDist execution engine construction(task graph construction and static scheduling order determination for the task graph)
+  - automatic distributed strategy search
+  - device mesh allocation
+  - TepDist execution engine construction(task graph construction and static scheduling order determination for the task graph)
 - 执行阶段：the client sends the data input command to execute the plan
 
 ![Architecture](/assets/img/blog/img_auto_parallelism/Untitled%2017.png)
@@ -649,13 +648,13 @@ SPMD策略：无需对庞大的DAG线性处理，而是按照三个层级
 cone（op的tensor的切分）→segment（cone的切分）→graph（segment的切分）
 
 - cone
-    - 由root（多个节点/计算量很大）和非root节点组成，DAG中有很多，一般呈现倒三角
-    - 用cone来粗粒度地表示节点，需要对每个cone都决定切分策略：枚举root的切分策略，cone内其余op按照通信最小选择（贪心/DP）
+  - 由root（多个节点/计算量很大）和非root节点组成，DAG中有很多，一般呈现倒三角
+  - 用cone来粗粒度地表示节点，需要对每个cone都决定切分策略：枚举root的切分策略，cone内其余op按照通信最小选择（贪心/DP）
 - segment
-    - 继续增大粒度：大模型在结构上重复堆叠，可以划分为多个layer。然后通过图分析识别图中关键点（也是cone中的root点），作为间隔点，将模型划分为线性个segment（包含多个cone）
-    - 对每个segment都决定切分策略：枚举关键点的切分策略，将cone作为基础块，最小化通信开销，使用ILP solver来获得该segment的切分策略（关键点也就是某个cone的root，不是在上一步就决定好它的拆分了吗，这里需要决定的拆分是怎样的？）
+  - 继续增大粒度：大模型在结构上重复堆叠，可以划分为多个layer。然后通过图分析识别图中关键点（也是cone中的root点），作为间隔点，将模型划分为线性个segment（包含多个cone）
+  - 对每个segment都决定切分策略：枚举关键点的切分策略，将cone作为基础块，最小化通信开销，使用ILP solver来获得该segment的切分策略（关键点也就是某个cone的root，不是在上一步就决定好它的拆分了吗，这里需要决定的拆分是怎样的？）
 - all graph
-    - 现在graph由近似线性拓扑的segment组成，天然适合DP来解决，以获得全图通信开销最小
+  - 现在graph由近似线性拓扑的segment组成，天然适合DP来解决，以获得全图通信开销最小
 
 ![all graph](/assets/img/blog/img_auto_parallelism/Untitled%2019.png)
 

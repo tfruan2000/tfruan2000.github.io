@@ -10,7 +10,7 @@ Triton Kernel 的写法可以参考：官方 [tutorial](https://triton-lang.org/
 
 # matmul
 
-来自 https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html
+来自 [03-mm](https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html)
 
 ## mn 主序
 

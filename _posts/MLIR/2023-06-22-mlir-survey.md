@@ -16,9 +16,9 @@ IR即 Intermediate Representation，可以看作是一种数据格式，作为�
 
 ![111](/assets/img/blog/img_mlir_survey/image-111.png)
 
--   ONNX(Open Neural Network Exchange) : ONNX 协议首先由微软和Meta提出，它定义了一组和环境、平台均无关的标准格式（如算子功能）。在训练完成后可以将支持框架(Pytorch、Tensorflow等)的模型转化为 ONNX 文件进行存储，ONNX 文件不仅存储了神经网络模型的权重，也存储了模型的结构信息以及网络中每一层的输入输出等信息。
--   TorchScrpit : PyTorch 最大的卖点是它对动态网络的支持，比其他需要构建静态网络的框架拥有更低的学习成本。但动态图模式在每次执行计算时都要重新构造计算图，非固定的网络结构给网络结构分析并进行优化带来了困难。TorchScript 就是为了解决这个问题而诞生的工具，包括代码的追踪及解析、中间表示的生成、模型优化、序列化等各种功能。
--   Relay IR : 与 TVM 框架绑定，是一个函数式、可微的、静态的、针对机器学习的领域定制编程语言，解决了普通DL框架不支持 control flow 以及 dynamic shape 的特点，使用 lambda calculus 作为基准IR。
+- ONNX(Open Neural Network Exchange) : ONNX 协议首先由微软和Meta提出，它定义了一组和环境、平台均无关的标准格式（如算子功能）。在训练完成后可以将支持框架(Pytorch、Tensorflow等)的模型转化为 ONNX 文件进行存储，ONNX 文件不仅存储了神经网络模型的权重，也存储了模型的结构信息以及网络中每一层的输入输出等信息。
+- TorchScrpit : PyTorch 最大的卖点是它对动态网络的支持，比其他需要构建静态网络的框架拥有更低的学习成本。但动态图模式在每次执行计算时都要重新构造计算图，非固定的网络结构给网络结构分析并进行优化带来了困难。TorchScript 就是为了解决这个问题而诞生的工具，包括代码的追踪及解析、中间表示的生成、模型优化、序列化等各种功能。
+- Relay IR : 与 TVM 框架绑定，是一个函数式、可微的、静态的、针对机器学习的领域定制编程语言，解决了普通DL框架不支持 control flow 以及 dynamic shape 的特点，使用 lambda calculus 作为基准IR。
 
 ## 1.2 常见的IR表示系统
 
@@ -58,7 +58,7 @@ Tensorflow 团队较早时采用了多种IR的部署，这样导致**软件碎�
 
 ## 2.1 Dialect
 
-1.   **Dialect 是什么？**
+1. **Dialect 是什么？**
 
 从源程序到目标程序，要经过一系列的抽象以及分析，通过 Lowering Pass 来实现从一个IR到另一个IR的转换。但**IR之间的转换需要统一格式**，统一IR的第一步就是要统一“语言”，各个IR原来配合不默契，谁也理解不了谁，就是因为“语言”不通。
 
@@ -66,7 +66,7 @@ Tensorflow 团队较早时采用了多种IR的部署，这样导致**软件碎�
 
 ![211](/assets/img/blog/img_mlir_survey/image-211.png)
 
-1.   **dialect 是怎么工作的？**
+1. **dialect 是怎么工作的？**
 
 dialect 将所有的IR放在了同一个命名空间中，分别对每个IR定义对应的产生式并绑定相应的操作，从而生成一个MLIR的模型。
 
@@ -76,7 +76,7 @@ dialect 将所有的IR放在了同一个命名空间中，分别对每个IR定�
 
 ![212](/assets/img/blog/img_mlir_survey/image-212.png)
 
-1.   **dialect 内部构成**
+1. **dialect 内部构成**
 
 dialect主要是由自定义的 `Type`、`Attribute`、`Interface` 以及 `operation` 构成。operation 细分为Attribute、Type、Constraint、Interface、Trait（属性、类型、限制、接口、特征）。同时存在 ODS (tablegen的后端)和 DRR 两个重要的模块，这两个模块都是基于 tableGen 模块，**ODS 模块用于定义 operation ，DRR 模块用于实现两个 dialect 之间的 conversion**。
 
@@ -99,10 +99,12 @@ dialect主要是由自定义的 `Type`、`Attribute`、`Interface` 以及 `opera
 
 （1）`%t_tensor`：定义结果名称，SSA值，由`%`和`<t_tensor>`构成，一般`<t_tensor>`是一个整数型数字。
 
->   IR 是 LLVM 的设计核心，它采用 SSA（Single-Static Assignments，静态单赋值）的形式，并具备两个重要特性：
+> IR 是 LLVM 的设计核心，它采用 SSA（Single-Static Assignments，静态单赋值）的形式，并具备两个重要特性：
 >
->   -   代码被组织成三地址指令
->   -   有无限的寄存器
+> - 代码被组织成三地址指令
+> - 有无限的寄存器
+>
+> 所谓 静态单赋值，是说所有ir需要先被定义才能被使用，定值只存在于声明时
 
 （2）`"toy.transpose"`：操作的名称，应该是唯一的字符串，方言空间以`.`开头；指明为 Toy Dialect 的transpose 操作；`.`之前的内容是 Dialect 命名空间的名字，`.`后面是操作的名称。
 
@@ -120,21 +122,22 @@ dialect主要是由自定义的 `Type`、`Attribute`、`Interface` 以及 `opera
 
 ## 2.3 创建新的dialect(添加新的operation)
 
->   本节创建新的dialect包括 手动编写C++创建 以及 **利用[ODS](https://mlir.llvm.org/docs/Interfaces/#attributeoperationtype-interfaces)框架生成**
+> 本节创建新的dialect包括 手动编写C++创建 以及 **利用[ODS](https://mlir.llvm.org/docs/Interfaces/#attributeoperationtype-interfaces)框架生成**
 >
->   ODS 全称 Operation Definition Specification，操作者只需要根据 operation 框架定义的规范，**在一个`.td`文件中填写相应的内容，使用 mlir 的 tableGen 工具就可以自动生成上面的 C++ 代码。**
+> ODS 全称 Operation Definition Specification，操作者只需要根据 operation 框架定义的规范，**在一个`.td`文件中填写相应的内容，使用 mlir 的 tableGen 工具就可以自动生成上面的 C++ 代码。**
 >
->   本节完全参考官方文档 ：[Chapter 2: Emitting Basic MLIR - MLIR (llvm.org)](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/)
+> 本节完全参考官方文档 ：[Chapter 2: Emitting Basic MLIR - MLIR (llvm.org)](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/)
 
-1.   以Toy语言为例，使用 C++ 定义 Toy Dialect，该 Dialect 将对 Toy 语言的结构进行建模，并为高级分析和转换提供方便的途径。
+1. 以Toy语言为例，使用 C++ 定义 Toy Dialect，该 Dialect 将对 Toy 语言的结构进行建模，并为高级分析和转换提供方便的途径。
 
->   Toy语言是为了验证及演示MLIR系统的整个流程而开发的一种基于Tensor的语言。
->   Toy 语言具有以下特性：
+> Toy语言是为了验证及演示MLIR系统的整个流程而开发的一种基于Tensor的语言。
+> Toy 语言具有以下特性：
 >
->   - Mix of scalar and array computations, as well as I/O
->   - Array shape Inference
->   - Generic functions
->   - Very limiter set of operators and features
+> - Mix of scalar and array computations, as well as I/O
+> - Array shape Inference
+> - Generic functions
+> - Very limiter set of operators and features
+
 (1) 使用 C++ 语言手动编写
 
 ```cpp
@@ -154,7 +157,7 @@ public:
 
 (2) 使用 ODS 框架自动生成
 
->   在使用 ODS 定义操作的这些代码，都在`Ops.td`中，默认位置为 ../mlir/examples/toy/Ch2/include/toy/Ops.td
+> 在使用 ODS 定义操作的这些代码，都在`Ops.td`中，默认位置为 ../mlir/examples/toy/Ch2/include/toy/Ops.td
 
 下面的代码块定义一个名字为 Toy 的 Dialect 在 ODS 框架中，使用`let <...> = "..."/[{...}];`方式依次明确 name、summary、description 和 cppNamespace（对应 Dialect 类所在的 C++ 命名空间）各个字段的定义。
 
@@ -191,7 +194,7 @@ ${build_root}/bin/mlir-tblgen -gen-dialect-decls ${mlir_src_root}/examples/toy/C
 
 ![231](/assets/img/blog/img_mlir_survey/image-231.png)
 
-1.   定义好 Dialect 之后，需要将其加载到 `MLIRContext` 中。默认情况下，MLIRContext 只加载内置的 Dialect，若要添加自定义的 Dialect，需要加载到 MLIRContext。
+定义好 Dialect 之后，需要将其加载到 `MLIRContext` 中。默认情况下，MLIRContext 只加载内置的 Dialect，若要添加自定义的 Dialect，需要加载到 MLIRContext。
 
 ```cpp
 // 此处的代码与官方文档中的稍有不同，但实际意义相同。在代码文件 toyc.cpp 中，默认位置为 ../mlir/examples/toy/Ch2/toyc.cpp。
@@ -203,7 +206,7 @@ int dumpMLIR() {
 }
 ```
 
-3.   有了上述的 Toy Dialect，便可以定义操作(operation)。官方文档围绕 `Toy toy.ConstantOp` 的定义介绍如何使用 C++ 的方式直接定义 operation。
+2. 有了上述的 Toy Dialect，便可以定义操作(operation)。官方文档围绕 `Toy toy.ConstantOp` 的定义介绍如何使用 C++ 的方式直接定义 operation。
 
 ```python
 # 此操作没有输入，返回一个常量。
@@ -246,6 +249,7 @@ class ConstantOp : public mlir::Op<
 ```
 
 定义好 operation 的行为后，我们可以在 Toy Dialect 的 initialize 函数中注册(register)，之后才可以正常在 Toy Dialect 中使用 ConstantOp。
+
 ```cpp
 // ../mlir/examples/toy/Ch2/include/toy/Dialect.cpp
 void ToyDialect::initialize() {
@@ -257,17 +261,15 @@ void ToyDialect::initialize() {
 
 首先在 ODS 中定义一个继承自 Op 类的基类 `Toy_Op`。
 
->    Operation 和 Op的区别
+> Operation 和 Op的区别
 >
->   `Operation`：用于对所有操作的建模，并提供通用接口给操作的实例。
+> `Operation`：用于对所有操作的建模，并提供通用接口给操作的实例。
 >
->   `Op`：每种特定的操作都是由 Op 类继承来的。同时它还是 Operation * 的 wrapper，这就意味着，当我们定义一个 Dialect 的 Operation 的时候，我们实际上是在提供一个 Operation 类的接口。
+> `Op`：每种特定的操作都是由 Op 类继承来的。同时它还是 Operation * 的 wrapper，这就意味着，当我们定义一个 Dialect 的 Operation 的时候，我们实际上是在提供一个 Operation 类的接口。
 >
+> Op 类的定义在 OpBased.td 文件中，默认位置为 ../mlir/include/mlir/IR/OpBased.td。
 >
->
->   Op 类的定义在 OpBased.td 文件中，默认位置为 ../mlir/include/mlir/IR/OpBased.td。
->
->   下面的代码都在`Ops.td`中，默认位置为 ../mlir/examples/toy/Ch2/include/toy/Ops.td
+> 下面的代码都在`Ops.td`中，默认位置为 ../mlir/examples/toy/Ch2/include/toy/Ops.td
 
 ```cpp
 class Toy_Op<string mnemonic, list<OpTrait> traits = []> :
@@ -343,15 +345,15 @@ ${build_root}/bin/mlir-tblgen -gen-op-defs ${mlir_src_root}/examples/toy/Ch2/inc
 
 ![232](/assets/img/blog/img_mlir_survey/image-232.png)
 
->    官方的文档在这时候没提及需要在 Toy Dialect 的 initialize 函数中注册生成的Op
+> 官方的文档在这时候没提及需要在 Toy Dialect 的 initialize 函数中注册生成的Op
 
-1.   创建新的dialect总结(使用ODS)
+创建新的dialect总结(使用ODS)
 
 整个 tableGen 模块是基于 ODS (Operation Definition Specification)框架进行编写以及发挥作用。tableGen 模块促进了自动化生成，减少了 operation 的手动开发，并且避免了冗余开发。
 
 我们以添加 Toy Dialect为例，总结添加流程如下：
 
->   `Ops.td`文件默认位置为 ../mlir/examples/toy/Ch2/include/toy/Ops.td
+> `Ops.td`文件默认位置为 ../mlir/examples/toy/Ch2/include/toy/Ops.td
 
 ①  (在Ops.td中) 定义一个和 Toy Dialect 的链接
 
@@ -386,7 +388,7 @@ def ConstantOp : Toy_Op<"constant", [NoSideEffect]> {
 
 ④ 通过 mlir-tblgen 工具生成 C++ 文件
 
-使用 `mlir-tblgen -gen-dialect-decls ` 命令生成对应的 `Dialect.h.inc` 文件。
+使用 `mlir-tblgen -gen-dialect-decls` 命令生成对应的 `Dialect.h.inc` 文件。
 
 使用 `mlir-tblgen -gen-op-defs` 命令生成对应的 `Ops.h.inc` 文件。
 
@@ -409,9 +411,9 @@ def ConstantOp : Toy_Op<"constant", [NoSideEffect]> {
 
 [MLIR Toy Tutorials 第三章 高级语义分析和转换](https://zhuanlan.zhihu.com/p/361704427)
 
->   在本章中我们使用 toy 语言接入 MLIR，最终转化为 LLVM IR，具体的流程如下：
+> 在本章中我们使用 toy 语言接入 MLIR，最终转化为 LLVM IR，具体的流程如下：
 >
->   .toy 源文件 $\rightarrow$ AST $\rightarrow$ MLIRGen(遍历AST生成MLIR表达式) $\rightarrow$ Transformation(变形消除冗余)  $\rightarrow$ Lowering  $\rightarrow$  LLVM IR / JIT 编译引擎
+> .toy 源文件 $\rightarrow$ AST $\rightarrow$ MLIRGen(遍历AST生成MLIR表达式) $\rightarrow$ Transformation(变形消除冗余)  $\rightarrow$ Lowering  $\rightarrow$  LLVM IR / JIT 编译引擎
 
 ## 3.1 Toy源码和AST
 
@@ -451,7 +453,7 @@ Module:
 
 ![321](/assets/img/blog/img_mlir_survey/image-321.png)
 
-1.   MLIRGen 模块会遍历 AST ，递归调用子函数，构建 `operation`。operation 是 dialect 中重要的组成元素，用来表示 dialect 中的某个操作，一个 dialect 中可以有很多的 operation。
+1. MLIRGen 模块会遍历 AST ，递归调用子函数，构建 `operation`。operation 是 dialect 中重要的组成元素，用来表示 dialect 中的某个操作，一个 dialect 中可以有很多的 operation。
 
 ```cpp
 mlir::Value mlirGen(CallExperAST &call)
@@ -478,9 +480,9 @@ mlir::Value mlirGen(CallExperAST &call)
 }
 ```
 
-2.   创建好的节点 operation 还没有输入参数等定义，Toy Dialect 模块负责定义各种操作和分析。（Toy Dialect 继承自 mlir::Dialect，并注册了属性、操作和数据类型等）
+2. 创建好的节点 operation 还没有输入参数等定义，Toy Dialect 模块负责定义各种操作和分析。（Toy Dialect 继承自 mlir::Dialect，并注册了属性、操作和数据类型等）
 
->   Toy Dialect 模块的创建 见 "2.3 创建新的dialect"
+> Toy Dialect 模块的创建 见 "2.3 创建新的dialect"
 
 ```cpp
 // TransposeOp
@@ -540,9 +542,9 @@ func @transpose_transpose(%arg0: tensor<*xf64>) -> tensor<*xf64> {
 }
 ```
 
-1.   第一步：直接使用 C++ 写出匹配和重写的代码
+1. 第一步：直接使用 C++ 写出匹配和重写的代码
 
->   下面这段代码位于在 ToyCombine.cpp 中，默认位置在 ../mlir/examples/toy/Ch3/mlir/ToyCombine.cpp
+> 下面这段代码位于在 ToyCombine.cpp 中，默认位置在 ../mlir/examples/toy/Ch3/mlir/ToyCombine.cpp
 
 ```cpp
 // Fold transpose(transpose(x)) -> x
@@ -573,9 +575,9 @@ struct SimplifyRedundantTranspose : public mlir::OpRewritePattern<TransposeOp> {
 };
 ```
 
-2.   第二步：将自定义的匹配和重写模式登记为 [canonicalization](https://mlir.llvm.org/docs/Canonicalization/) 模式，使得后续可以使用它
+2. 第二步：将自定义的匹配和重写模式登记为 [canonicalization](https://mlir.llvm.org/docs/Canonicalization/) 模式，使得后续可以使用它
 
->   下面这段代码位于 toyc.cpp 中，默认位置为 ../mlir/examples/toy/Ch3/mlir/ToyCombine.cpp
+> 下面这段代码位于 toyc.cpp 中，默认位置为 ../mlir/examples/toy/Ch3/mlir/ToyCombine.cpp
 
 ```cpp
 void TransposeOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
@@ -585,9 +587,9 @@ void TransposeOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
 }
 ```
 
-3.   第三步：在`Ops.td`中设置相应选项
+3. 第三步：在`Ops.td`中设置相应选项
 
->   下面这段代码位于 Ops.td 中，默认位置为../mlir/examples/toy/Ch3/include/toy/Ops.td
+> 下面这段代码位于 Ops.td 中，默认位置为../mlir/examples/toy/Ch3/include/toy/Ops.td
 
 ```cpp
 def TransposeOp : Toy_Op<"transpose", [Pure]> {
@@ -600,9 +602,9 @@ def TransposeOp : Toy_Op<"transpose", [Pure]> {
 }
 ```
 
-4.   第四步：更新主文件以添加 `optimization pipeline`
+4. 第四步：更新主文件以添加 `optimization pipeline`
 
->   下面这段代码位于 toyc.cpp 中，默认位置在 ../mlir/examples/toy/Ch3/toyc.cpp
+> 下面这段代码位于 toyc.cpp 中，默认位置在 ../mlir/examples/toy/Ch3/toyc.cpp
 
 ```cpp
 if (enableOpt) {// enableOpt 是从命令行输入的编译选项，例如O1, O2
@@ -617,7 +619,7 @@ if (enableOpt) {// enableOpt 是从命令行输入的编译选项，例如O1, O2
 }
 ```
 
-5.   最后执行 `toyc-ch3 ../../test/Examples/Toy/Ch3/transpose_transpose.toy -emit=mlir -opt`，得到优化后的 Toy Dialect IR (MLIR表达式)如下
+5. 最后执行 `toyc-ch3 ../../test/Examples/Toy/Ch3/transpose_transpose.toy -emit=mlir -opt`，得到优化后的 Toy Dialect IR (MLIR表达式)如下
 
 ```cpp
 toy.func @transpose_transpose(%arg0: tensor<*xf64>) -> tensor<*xf64> {
@@ -660,13 +662,13 @@ module {
 }
 ```
 
->   下面步骤中的代码均位于在 ToyCombine.td 中，默认位置在 ../mlir/examples/toy/Ch3/mlir/ToyCombine.td
+> 下面步骤中的代码均位于在 ToyCombine.td 中，默认位置在 ../mlir/examples/toy/Ch3/mlir/ToyCombine.td
 >
->   使用：`${build_root}/bin/mlir-tblgen --gen-rewriters ${mlir_src_root}/examples/toy/Ch3/mlir/ToyCombine.td -I ${mlir_src_root}/include/` 自动生成 C++ 代码
+> 使用：`${build_root}/bin/mlir-tblgen --gen-rewriters ${mlir_src_root}/examples/toy/Ch3/mlir/ToyCombine.td -I ${mlir_src_root}/include/` 自动生成 C++ 代码
 >
->   自动生成的 C++ 代码在 ../mlir/examples/toy/Ch3/mlir/ToyCombine.inc
+> 自动生成的 C++ 代码在 ../mlir/examples/toy/Ch3/mlir/ToyCombine.inc
 
-1.   基础方法
+1. 基础方法
 
 ```cpp
 // Reshape(Reshape(x)) = Reshape(x)
@@ -674,7 +676,7 @@ def ReshapeReshapeOptPattern : Pat<(ReshapeOp(ReshapeOp $arg)),
                                    (ReshapeOp $arg)>;
 ```
 
-2.   添加参数约束的方法
+2. 添加参数约束的方法
 
 DDR 提供了一种添加参数约束的方法，以应对**当改写只发生在某些特定条件下**的情况。(when the transformation is conditional on some properties of the arguments and results)
 
@@ -686,7 +688,7 @@ def RedundantReshapeOptPattern : Pat<
   [(TypesAreIdentical $res, $arg)]>;
 ```
 
-3.   使用 [NativeCodeCall](https://mlir.llvm.org/docs/DeclarativeRewrites/#nativecodecall-transforming-the-generated-op)
+3. 使用 [NativeCodeCall](https://mlir.llvm.org/docs/DeclarativeRewrites/#nativecodecall-transforming-the-generated-op)
 
 Some optimizations may require additional transformations on instruction arguments. NativeCodeCall 通过调用 `C++ helper function` 或使用 `inline C++` 进行更复杂的转换。
 
@@ -698,7 +700,7 @@ def FoldConstantReshapeOptPattern : Pat<
   (ConstantOp (ReshapeConstant $arg, $res))>;
 ```
 
-4.   最后执行 `toyc-ch3 ../../test/Examples/Toy/Ch3/trivial_reshape.toy -emit=mlir - opt`，得到优化后的 Toy Dialect IR (MLIR表达式)如下
+4. 最后执行 `toyc-ch3 ../../test/Examples/Toy/Ch3/trivial_reshape.toy -emit=mlir - opt`，得到优化后的 Toy Dialect IR (MLIR表达式)如下
 
 ```cpp
 module {
@@ -714,9 +716,9 @@ module {
 
 通过使用 Dialect，MLIR 可以表示多种不同等级的抽象。尽管这些不同的 Dialect 表示不同的抽象，但某些操作的算法机制十分相似，为了减少代码重复，MLIR 提供了一组通用的转换和分析。
 
--   为了代码执行速度更快，将函数进行**内联(inline)操作**
+- 为了代码执行速度更快，将函数进行**内联(inline)操作**
 
--   为了代码生成阶段更方便，需要进行**形状推断**，确定所有 tensor 的 shape
+- 为了代码生成阶段更方便，需要进行**形状推断**，确定所有 tensor 的 shape
 
 ![431](/assets/img/blog/img_mlir_survey/image-431.png)
 
@@ -751,7 +753,7 @@ module{
 }
 ```
 
-1.   **内联(inline)**
+1. **内联(inline)**
 
 内联会**将函数展开，把函数的代码复制到每一个调用处**，以解决一些频繁调用的小函数大量消耗栈空间（栈内存）的问题。使用该优化方法后，编译器会将**简单函数**内嵌到调用处，以储存空间为代价换取运行速度。
 
@@ -864,7 +866,7 @@ def CastOp : Toy_Op<"cast", [
 }
 ```
 
-上述代码将 `CastOpInterface` 加入了 traits 列表中，还需要使用 `areCastCompatible `来定义进入此接口的方法(hook into this interface)。
+上述代码将 `CastOpInterface` 加入了 traits 列表中，还需要使用 `areCastCompatible`来定义进入此接口的方法(hook into this interface)。
 
 ```cpp
 // 位于 ../mlir/examples/toy/Ch4/mlir/Dialect.cpp
@@ -904,7 +906,7 @@ struct ToyInlinerInterface : public DialectInlinerInterface {
 if (enableOpt) {
     mlir::PassManager pm(module->getName());
     applyPassManagerCLOptions(pm);
-	...
+ ...
     // 将内联优化应用于所有function，然后会删去其他的function，只剩下一个main
     pm.addPass(mlir::createInlinerPass());
     ...
@@ -927,7 +929,7 @@ toy.func @main() {
 }
 ```
 
-2.   **形状推断**
+2. **形状推断**
 
 目前主函数中存在动态和静态形状的混合，提前确定所有 tensor 的形状能够使最终生成的代码更加简洁。
 
@@ -971,9 +973,9 @@ void MulOp::inferShapes() { getResult().setType(getOperand(0).getType()); }
 if (enableOpt) {
     mlir::PassManager pm(module->getName());
     applyPassManagerCLOptions(pm);
-	// 将内联优化应用于所有function，然后会删去其他的function，只剩下一个main
+ // 将内联优化应用于所有function，然后会删去其他的function，只剩下一个main
     pm.addPass(mlir::createInlinerPass());
-	// 现在只剩下一个function(main)，我们可以推断出operations的shape
+ // 现在只剩下一个function(main)，我们可以推断出operations的shape
     mlir::OpPassManager &optPM = pm.nest<mlir::FuncOp>();
     // 形状推断优化
     optPM.addPass(mlir::toy::createShapeInferencePass());
@@ -1005,9 +1007,9 @@ toy.func @main() {
 
 上面编写好的 ShapeInferencePass 会针对每一个 function 进行操作，独立地优化每一个 function （run on each function in isolation）。如果想将优化操作泛化到全局（run on any isolated operation），则可以使用 MLIR 的 [OperationPass](https://mlir.llvm.org/docs/PassManagement/)接口。
 
->   " But here our module only contains functions, so there is no need to generalize to all operations."
+> " But here our module only contains functions, so there is no need to generalize to all operations."
 >
->   但在这里，我们的模块只包含函数的处理，因此不需要将 ShapeInferencePass 泛化到所有操作。
+> 但在这里，我们的模块只包含函数的处理，因此不需要将 ShapeInferencePass 泛化到所有操作。
 
 ```cpp
 // 位于 ../mlir/examples/toy/Ch4/mlir/ShapeInferencePass.cpp
@@ -1037,9 +1039,9 @@ lowering 过程中越晚执行的转换越有结构劣势，因为缺乏高层�
 
 lowering 主要是为了更贴近硬件做代码生成和做硬件相关的优化。
 
->   每次`转换遍历(pass)` 都需要保持原子性，在其内部可能会临时违反源程序语义，但在每个转换遍历之后，中间表示应该是正确的。编译器依赖**每个遍历之后的中间表示验证 (validation)** 来保证正确性。
+> 每次`转换遍历(pass)` 都需要保持原子性，在其内部可能会临时违反源程序语义，但在每个转换遍历之后，中间表示应该是正确的。编译器依赖**每个遍历之后的中间表示验证 (validation)** 来保证正确性。
 >
->   在保证转换的正确性之后，才可进行优化。
+> 在保证转换的正确性之后，才可进行优化。
 
 ## 5.1 从 MLIR 表达式进行部分 Lowering
 
@@ -1047,30 +1049,29 @@ lowering 主要是为了更贴近硬件做代码生成和做硬件相关的优�
 
 MLIR 中有许多不同的 Dialect，lowering 过程其实就是**在各种 Dialect 之间转化**，而 MLIR 提供了一套统一的 `DialectConversion` 框架来实现不同 Dialect 之间的转化。
 
-
 ![213](/assets/img/blog/img_mlir_survey/image-213.png)
 
-> 1.   要使用 DialectConversion 框架需要 Three Components
+> 1. 要使用 DialectConversion 框架需要 Three Components
 >
 > （1）Conversion Target（转换目标）
 >
 > 对转换目标 Dialect 进行合法化(legal)，对当前的 Dialect 进行非法化(illegal)。主要完成以下三件事：
 >
-> -   Legal Dialects (target dialects)
+> - Legal Dialects (target dialects)
 >
 > `target.addLegalDialect<mlir::AffineOpsDialect, mlir::StandardOpsDialect>();`
 >
 > 将 AffineOpsDialect 和 StandardOpsDialect 添加为合法的目标
 >
-> -   Illegal Dialects (fail if not converted)
+> - Illegal Dialects (fail if not converted)
 >
 > `target.addIllegalDIalect<ToyDialect>();`
 >
 > 由于 Toy Dialect 已经转换走了，就将其添加为非法的目标
 >
-> -   Legal and Illegal Ops
+> - Legal and Illegal Ops
 >
-> `target.addLegalOp<PrintOp>(); ` // 将保留操作添加为合法操作
+> `target.addLegalOp<PrintOp>();` // 将保留操作添加为合法操作
 >
 > `target.addIllegalOp<BranchOp>Op;` // 将废弃操作添加为非法操作
 >
@@ -1082,7 +1083,7 @@ MLIR 中有许多不同的 Dialect，lowering 过程其实就是**在各种 Dial
 >
 > 当前 dialect 中若存在某些特定的数据类型，则需要转换到目标 dialect 中相应的数据类型。
 >
-> 2.   DialectConversion 框架的转换有 Tow Modes
+> 2. DialectConversion 框架的转换有 Tow Modes
 >
 > （1）Partial: Not all input operations have to be legalized to the target
 >
@@ -1122,7 +1123,7 @@ toy.func @main() {
 }
 ```
 
-1.   第一步：定义转换目标（Conversion Target）
+1. 第一步：定义转换目标（Conversion Target）
 
 为了实现进一步优化，将 Toy Dialect 中计算密集操作转换为 Affine Dialect 和 Standard Dialect（这两个都是 mlir 内置的 Dialect）的组合，但由于 Affine Dialect 中没有 print operation，就需要将 Toy Dialect 中的 print operation 保留并重写。
 
@@ -1143,11 +1144,11 @@ void ToyToAffineLoweringPass::runOnFunction() {
 }
 ```
 
-1.   第二步：明确转换模式（Conversion Patterns）
+1. 第二步：明确转换模式（Conversion Patterns）
 
 这一步将使用 `ConversionPattern`实现对 operation 的匹配和重写，把 illegal operation 转换为 legal operation。官方文档以转换 ToyDialect 中 transpose 操作为例。
 
->    ConversionPattern 类似于 RewritePatterns 的转换逻辑，但要多接受一个的操作数（operands）参数，用来在处理类型转换的时候，对旧类型匹配。
+> ConversionPattern 类似于 RewritePatterns 的转换逻辑，但要多接受一个的操作数（operands）参数，用来在处理类型转换的时候，对旧类型匹配。
 
 ```cpp
 // 位于 ../mlir/examples/toy/Ch5/mlir/LowerToAffineLoops.cpp
@@ -1178,7 +1179,7 @@ struct TransposeOpLowering : public mlir::ConversionPattern {
 };
 ```
 
-3.   第三步：将第二步定义的转换模式(TransposeOpLowering)添加到lower过程中用到的 patterns list
+3. 第三步：将第二步定义的转换模式(TransposeOpLowering)添加到lower过程中用到的 patterns list
 
 ```cpp
 // 位于 ../mlir/examples/toy/Ch5/mlir/LowerToAffineLoops.cpp
@@ -1191,7 +1192,7 @@ void ToyToAffineLoweringPass::runOnOperation() {
 }
 ```
 
-4.   第四步：确定 lower 模式 —— Partial
+4. 第四步：确定 lower 模式 —— Partial
 
 DialectConversion 框架提供了两种模式的 lowering，Partial Method 和 Full Method，由于需要将 Toy Dialect 中的 print operation 保留并重写，所以这里使用 Partial Method 执行。
 
@@ -1204,21 +1205,21 @@ void ToyToAffineLoweringPass::runOnOperation() {
 }
 ```
 
-5.   第五步：将保留的 toy.print 进行重写，以匹配数据格式
+5. 第五步：将保留的 toy.print 进行重写，以匹配数据格式
 
 在这一步需要将保留的 toy.print 的输出格式 "transform from a value-type, TensorType, to an allocated (buffer-like) type, MemRefType"。
 
 >官方文档中提及到有三种实现方法：
 >
->-   Generate operations from the buffer`load`
+>- Generate operations from the buffer`load`
 >
 >remains the definition of the operation unchanged, but involves a full copy
 >
->-   Generate a new version of that operates on the lowered type`toy.print`
+>- Generate a new version of that operates on the lowered type`toy.print`
 >
 >no hidden, unnecessary copy to the optimizer, but needs another operation definition
 >
->-   Update to allow for operating on the lowered type`toy.print`
+>- Update to allow for operating on the lowered type`toy.print`
 >
 >requires mixing abstraction levels in the dialect
 
@@ -1233,19 +1234,19 @@ def PrintOp : Toy_Op<"print"> {
 }
 ```
 
-6.   第六步：将定义好的 lowering 添加到 optimization pipeline 中
+6. 第六步：将定义好的 lowering 添加到 optimization pipeline 中
 
 ```cpp
 // 位于 ../mlir/examples/toy/Ch5/toyc.cpp
 // 使用 PassManger 模块添加优化工序
 if (isLoweringToAffine) {
     // 若命令行中指令是 -emit=mlir-affine，则为真
-	mlir::OpPassManager &optPM = pm.nestmlir::FuncOp();
+ mlir::OpPassManager &optPM = pm.nestmlir::FuncOp();
     // LowerToAffine优化，规范化框架优化，公共子表达式消除优化
-	optPM.addPass(mlir::toy::createLowerToAffinePass());
-	optPM.addPass(mlir::createCanonicalizerPass());
-	optPM.addPass(mlir::createCSEPass());
-	...
+ optPM.addPass(mlir::toy::createLowerToAffinePass());
+ optPM.addPass(mlir::createCanonicalizerPass());
+ optPM.addPass(mlir::createCSEPass());
+ ...
 }
 ```
 
@@ -1301,7 +1302,7 @@ func.func @main() {
 }
 ```
 
-7.   第七步：在 Affine Dialect 中进行优化
+7. 第七步：在 Affine Dialect 中进行优化
 
 上一步中的初级优化是正确的，但产生了一些冗余负载(reluctant loads)，可以将 LoopFunsionPass 和 MemRefDataFlowOptPass 添加到 optimization pipeline中进一步优化。
 
@@ -1397,7 +1398,7 @@ static FlatSymbolRefAttr getOrInsertPrintf(PatternRewriter &rewriter,
 }
 ```
 
-2.   第二步：Conversion Target
+2. 第二步：Conversion Target
 
 "For this conversion, aside from the top-level module, we will be lowering everything to the LLVM dialect."
 
@@ -1408,7 +1409,7 @@ target.addLegalDialect<LLVM::LLVMDialect>();
 target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
 ```
 
-3.   第三步：Type Conversion
+3. 第三步：Type Conversion
 
 接下里的 lower 过程还需将当前所使用的 MemRef 类型转换为 LLVM 中的表示形式，MLIR 中已经定义好很多 typeConverter 用于复用。
 
@@ -1419,7 +1420,7 @@ target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
 LLVMTypeConverter typeConverter(&getContext());
 ```
 
-1.   第四步：Conversion Patterns
+1. 第四步：Conversion Patterns
 
 ```cpp
 // 位于 ../mlir/examples/toy/Ch6/mlir/LowerToLLVM.cpp
@@ -1436,7 +1437,7 @@ mlir::populateStdToLLVMConversionPatterns(typeConverter, patterns);
 patterns.add<PrintOpLowering>(&getContext());
 ```
 
-5.   第五步：确定 lower 模式 —— Full
+5. 第五步：确定 lower 模式 —— Full
 
 ```cpp
 // 位于../mlir/examples/toy/Ch6/mlir/LowerToLLVM.cpp
@@ -1448,7 +1449,7 @@ void ToyToLLVMLoweringPass::runOnFunction() {
 }
 ```
 
-6.   第六步：将定义好的 lowering 添加到 optimization pipeline 中
+6. 第六步：将定义好的 lowering 添加到 optimization pipeline 中
 
 ```cpp
 // 位于 ../mlir/examples/toy/Ch6/toyc.cpp
@@ -1467,14 +1468,14 @@ llvm.mlir.global internal constant @nl("\0A\00")
 llvm.mlir.global internal constant @frmt_spec("%f\00")
 llvm.func @printf(!llvm<"i8*">, ...) -> !llvm.i32
 llvm.func @malloc(!llvm.i64) -> !llvm<"i8*"> llvm.func @main(){
-	%0=llvm.mlir.constant(1.000000e+00 : f64) : !llvm.double
+ %0=llvm.mlir.constant(1.000000e+00 : f64) : !llvm.double
     %1=llvm.mlir.constant(2.000000e+00 : f64) : !llvm.double
     %2=llvm.mlir.constant(3.000000e+00 : f64) : !llvm.double
-	...
+ ...
 }
 ```
 
-7.   第七步：从LLVM Dialect到LLVM IR，再到CodeGen
+7. 第七步：从LLVM Dialect到LLVM IR，再到CodeGen
 
 现在已经转换到 LLVM Dialect，最终需要lower到 LLVM IR，使用 MLIR 内置的转换函数`translateModuleToLLVMIR`即可。然后利用 LLVM tool chain 即可完成多后端 CodeGen。
 
@@ -1484,10 +1485,10 @@ llvm.func @malloc(!llvm.i64) -> !llvm<"i8*"> llvm.func @main(){
 // 生成的LLVM IR表达式
 define void @main() local_unnamed_addr #1{
 .preheader3:
-	%θ = tail call 132 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([4 x i8], [4xi8]*@frmt_spec,i64 0,i64 0),double 1.000000e+00)
-	%1 = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds([4 x i8],[4 x i8]*@frmt_spec,i64 0,i64 0),double 1.600000e+01)
+ %θ = tail call 132 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([4 x i8], [4xi8]*@frmt_spec,i64 0,i64 0),double 1.000000e+00)
+ %1 = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds([4 x i8],[4 x i8]*@frmt_spec,i64 0,i64 0),double 1.600000e+01)
 %putchar=tail call i32 @putchar(132 10)
-	...
+ ...
 }
 ```
 
@@ -1508,4 +1509,3 @@ define void @main() local_unnamed_addr #1{
       =llvm               - output the LLVM IR dump
       =jit                - JIT the code and run it by invoking the main
 ```
-

@@ -48,7 +48,7 @@ MLIR 代码生成管道(code generation pipeline)需要经过一系列中间步�
 
 dialects 可以根据其 feature 的抽象级别 粗略地组织到一个堆栈中。将较高级别的抽象表示 lower 到较低级别的抽象表示通常较为简单，但反过来就不是这样了。
 
->   在编译器一系列转换程序的过程中，越来越多的高层次的简明信息被打散，转换为低层次的细碎指令，这个过程被称为代码表示递降`lowerinng` ，与之相反的过程被称为代码表示递升`raising` 。raising远比lowering困难，因为需要在庞杂的细节中找出宏观脉络。
+> 在编译器一系列转换程序的过程中，越来越多的高层次的简明信息被打散，转换为低层次的细碎指令，这个过程被称为代码表示递降`lowerinng` ，与之相反的过程被称为代码表示递升`raising` 。raising远比lowering困难，因为需要在庞杂的细节中找出宏观脉络。
 
 ![2](/assets/img/blog/img_mlir_codegen/2.png)
 
@@ -90,8 +90,8 @@ Tensorflow Kernel Generator项目，从TensorFlow（TF）Dialect开始，最近�
 
 在生成多个内核时，与 tensorflow 相关的流将使用 Async Dialect 来编排计算。
 
->   MHLO 是 Meta HLO，由于像隐式广播移除等特性，更适合编译，并支持动态形状，其中 HLO 是高级优化器表示，源自XLA
->    [LMHLO](https://github.com/tensorflow/mlir-hlo#lmhlo) 是 Late MHLO，与 MHLO 相同，但在 buffers 而不是 tensors 上
+> MHLO 是 Meta HLO，由于像隐式广播移除等特性，更适合编译，并支持动态形状，其中 HLO 是高级优化器表示，源自XLA
+> [LMHLO](https://github.com/tensorflow/mlir-hlo#lmhlo) 是 Late MHLO，与 MHLO 相同，但在 buffers 而不是 tensors 上
 
 ## IREE Compiler (LLVM Target)
 
@@ -158,7 +158,7 @@ Linalg  Dialect 是 MLIR CodeGen pipeline 的主要入口点之一。它可以�
 
 我们发现，在 GodeGen pipeline 内 较高层次抽象的转换过程中，并不需要复杂的分析就可以获得必要的有效性信息。然而，更高层次抽象通常对可表示的内容有严格的限制。在利用这种优点的同时，要明白它们的表达性有限（意味着可优化的程度有限），需要多结合在较低层次的转换。如此，在不重新实现顶层抽象的情况下，可以快速提升表达性，例如 DHLO 中的动态形状。
 
->   **DHLO IR**，是在XLA的HLO IR基础上，扩展了一套具有完备动态shape表达能力的IR。静态场景下，HLO IR中的shape表达会被静态化，所有的shape计算会被固化为编译时常量保留在编译结果中；而在动态shape场景下，IR本身需要有足够的能力表达shape计算和动态shape信息的传递。
+> **DHLO IR**，是在XLA的HLO IR基础上，扩展了一套具有完备动态shape表达能力的IR。静态场景下，HLO IR中的shape表达会被静态化，所有的shape计算会被固化为编译时常量保留在编译结果中；而在动态shape场景下，IR本身需要有足够的能力表达shape计算和动态shape信息的传递。
 
 ## Need for More Structure
 

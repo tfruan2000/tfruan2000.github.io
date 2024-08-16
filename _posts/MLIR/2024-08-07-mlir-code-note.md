@@ -170,9 +170,11 @@ struct TransposeSliceLayoutPattern : public OpRewritePattern<mhlo::SliceOp> {
 ```bash
 mlir/include/mlir/Pass/AnalysisManager.h
 ```
+
 `Analyses` 是独立于其他设施的数据结构，可以将相关的信息 perserve 起来。
 
 例如 `Transforms/CSE.cpp` 中就将一些 `Analyses` 信息保存给下一次分析。
+
 ```cpp
   // If there was no change to the IR, we mark all analyses as preserved.
   if (!changed)
@@ -358,6 +360,7 @@ bool isOpReadOrWriteInplace(Operation *op, Value val) {
 
 用来遍历 use-def 链的 analysis
 一般可以将 use-def 理解为
+
 - def : 写
 - use : 读
 
@@ -393,6 +396,7 @@ bool isOpReadOrWriteInplace(Operation *op, Value val) {
 ```
 
 输入， root可以是op，也可以是value
+
 ```cpp
 void getForwardSlice(Operation *op, SetVector<Operation *> *forwardSlice,
                      const ForwardSliceOptions &options = {});
@@ -494,6 +498,7 @@ ArrayAttr tmp = ArrayAttr::get(context, mappings)
 
 - src : operation*
   - getAttr / getAttrOfType ，一般get完之后要cast到对应的AttrType，例如
+
     ```cpp
     op->getAttr(getAliasAttrKey()).dyn_cast_or_null<mlir::IntegerAttr>()
     op->getAttrOfType<DenseI64ArrayAttr>
@@ -551,11 +556,13 @@ Block 包含 `BlockArgument`（使用getArguements()获得）和 `BlockOperand`
 2.遍历block
 
 - walk
+
   ```cpp
   block->walk([&](Operation *op) {...
   ```
 
 - 只遍历同层op
+
   ```cpp
   Operation &workOp : rootBlock->getOperations()
   ```
@@ -724,6 +731,7 @@ public:
 - notifyOperationModified : in-place 修改
 
 - notifyOperationReplaced : 调用 replaceOp时触发
+
   ```cpp
   if (auto *listener = dyn_cast_if_present<RewriteBase::Listener>(rewriter.getListener())) {
     listener->notifyOperationReplaced(op, existing);
@@ -731,6 +739,7 @@ public:
   rewriter.replaceAllUsesWith(op->getResults())
   opsToErase.push_back(op);
   ```
+
 - notifyOperationErased : 调用 earseOp时触发
 
 2.modifyOpInPlace : 会调用 `startOpModification` 和 `finalizeOpModification`
@@ -911,6 +920,7 @@ getBlock()
 
 - create<OpTy>(…)
 - create(OperationState)
+
   ```cpp
   OperationState state(op->getLoc(), op->getName().getStringRef(), operands,
                        newResults, op->getAttrs(), op->getSuccessors());
@@ -928,6 +938,7 @@ getBlock()
 - replaceAllOpUsesWith(Operation \*from, ValueRange to) / replaceAllOpUsesWith(Opeation \*from, Operation \*to )
 
 - replaceUsesWithIf(Value from, Value to, func_ref) / replaceUsesWithIf(ValueRange from, Value to, func_ref) / replaceUsesWithIf(Operation \*op, Value to, func_ref)
+
   ```cpp
   // 替换forallOp外的使用
   rewriter.replaceAllUsesWithIf(workOp->getResult(0), forallOp->getResults(idx)
@@ -938,6 +949,7 @@ getBlock()
   ```
 
 - replaceAllUsesExcept(Value from, Value to, Operation *exceptedUser) 本质是使用 `replaceUsesWithIf` 来实现
+
   ```cpp
   rewriter.replaceUsesWithIf(from, to,
       [&](OpOperand use) { return use.getOwner() != exceptedUser; });
@@ -1115,6 +1127,7 @@ target.addDynamicallyLegalOp
 ```
 
 例如只对标量op进行转换的pattern
+
 ```cpp
 target.markUnknownOpDynamicallyLegal([](Operation *op) {
 	if (isa<math::MathDialect>(op->getDialect()) &&
@@ -1242,6 +1255,7 @@ mlir/Conversion/LLVMCommon/TypeConverter.h
 - `addConversion` ：定义type转换规则
 
 例如
+
 ```cpp
 typeConverter converter;
 converter.addConversion([&]ToyIntegerType t) -> std::optional<Integer> {
@@ -1282,7 +1296,6 @@ public:
 ```
 
 ---
-
 
 # Dataflow
 
@@ -1396,6 +1409,7 @@ mlir/lib/IR/Diagnostics.cpp
 当rewrite-pattern使用op的verify(rewrite出的op是否合法)来判断pattern是否match-and-rewrite成功时，那apply-pattern时的报错就是不必要的，可以通过去除handler的办法消除掉这些不必要的报错
 
 使用
+
 ```cpp
 auto *context = &getContext();
 auto handlerID =
@@ -1410,7 +1424,6 @@ context->getDiagEngine().eraseHandler(handlerID);
 
 ---
 
-
 # Dialect
 
 新增一个dialect可以参考最近mlir中新增的[polynomial dialect](https://github.com/llvm/llvm-project/commit/55b6f17071d25b77fcdc910ca9b15f89305137e0) ，然后就是补充各种dialect2dialect的conversion了
@@ -1418,7 +1431,6 @@ context->getDiagEngine().eraseHandler(handlerID);
 ## 组成
 
 详见 MLIR Survey 一文 的第二节 `dialect 和 operation` 相关的介绍
-
 
 ## DialectRegistry
 
@@ -1481,6 +1493,7 @@ mlir/lib/IR/AffineMap.cpp
 ```
 
 - `getFilteredIdentityMap` 创建条件过滤affinemap
+
 ```cpp
 /// getFilteredIdentityMap(3, [false, false, true]) -> affine_map<(d0, d1, d2) -> (d2)>
 AffineMap getFilteredIdentityMap(MLIRContext *ctx, unsigned numDims,
@@ -1567,7 +1580,6 @@ std::optional<unsigned> AffineMap::getResultPosition(AffineExpr input) const {
 
 使用 `analysis` 简化affinemap，大体是折叠常量相关的计算
 
-
 ### AffineExpr
 
 ```bash
@@ -1614,7 +1626,6 @@ mlir/lib/IR/AffineExpr.cpp
 例:
 affine_map (d1, d2) -> (d1 - d2)
 这是一个 AffineBinaryOpExpr，kind是add，表达为(1 * d1, -1 * d2)。lhs和rhs都是 AffineConstantExpr，value分别是(1, -1)
-
 
 ``` cpp
 /// Return "true" if `candidate` is a negated expression, i.e., Mul(-1, expr).
@@ -1671,6 +1682,7 @@ static bool isNegatedAffineExpr(AffineExpr candidate, AffineExpr &expr) {
 - LinalgInterface
   - bool hasDynamicShape()
   - SmallVector<AffineMap> getIndexingMapsArray()
+
     ```cpp
     // 判断linalgOp是ElementwiseOp
     auto isElementwiseLinalg = [](linalg::LinalgOp linalgOp) -> bool {
@@ -1755,6 +1767,7 @@ mlir/lib/Dialect/SCF/IR/SCF.cpp
 ### op
 
 - scf.for : 循环body必须串行执行，因为每次迭代返回值会写回blockarg，所以下一次使用 blockarg的值受上次迭代的影响
+
   ```text
   %alloc = memref.alloc() : memref<16xi32>
   %1 = scf.for %arg0 = %c0_i32 to %c8_i32 step %c1_i32 iter_args(%arg1 = %alloc) -> (memref<16xi32>) {
@@ -1768,6 +1781,7 @@ mlir/lib/Dialect/SCF/IR/SCF.cpp
 - scf.forall / scf.parallel ：**循环body的程序是可以的并发执行**，没有前后依赖的
   可以使用多线程的方式来执行，线程的id就是循环的迭代变量
   从scf到launch这种转换是可以通过代码自动完成的，需要的额外信息就是每一个循环的轴到launch的轴的映射关系
+
     ```text
     scf.forall (%thread_id_1, %thread_id_2) in (%num_threads_1, %num_thread_2) {
              // ...
@@ -1789,7 +1803,6 @@ mlir/lib/Dialect/SCF/IR/SCF.cpp
 	有一个 `scf.if` 的canonicalize pattern，叫 `ConvertTrivialIfToSelect`，可以尽量消除 else region
 
 	经常在 `bufferize` 后的 `canonicalize` 起效，因为`bufferize` 后 `scf.yield` 的operand更关系更明确了
-
 
 	```text
 	// ./build/bin/mlir-opt test_if.mlir --split-input-file --one-shot-bufferize --canonicalize
@@ -1860,7 +1873,6 @@ mlir/lib/Dialect/SCF/IR/SCF.cpp
 	  return %3 : tensor<2xi32>
 	}
 	```
-
 
 ## Tensor
 
@@ -2023,6 +2035,7 @@ struct Range {
 ```
 
 Range数据结构一般使用以下方法获得
+
 ```cpp
 auto tileInfo = cast<TilingInterface>(op);
 SmallVector<Range> domain = op.getInterationDomain(rewriter);
@@ -2031,6 +2044,7 @@ SmallVector<Range> domain = op.getInterationDomain(rewriter);
 由于是 `OpFoldResult` 类型，访问时使用`getValueOrCreateConstantIndexOp`方法
 
 取size的时候也经常先cast为Attribute
+
 ```cpp
 if (inAttr = range.size.dyn_cast<Attribute>()) {
   tileSize =inAttr.cast<IntegerAttr>().getInt();
@@ -2106,7 +2120,6 @@ mlir/lib/IR/Dominance.cpp
 
 - 如果a是Value，则返回 `(Operation *)a.getDefiningOp() == b || properlyDominates(a, b)`
 
-
 2.Bool properlyDominates(T *a, Operation *b)
 
 - 如果a是Operation，则直接调用 properlyDominatesImpl
@@ -2178,11 +2191,13 @@ mlir/include/mlir/IR/IRMapping.h
 用法：
 
 1.构造
+
 - map(Value from, Value to)
 - map(Block *from, Block *to)
 - map(Operation *from, Operation *to)
 
 2.lookupOrValue(from, value);
+
 - lookupOrDefault <=> lookupOrValue(from, from);
 
 ```cpp
@@ -2241,8 +2256,9 @@ linalOp都包含该interface
 ```cpp
 OpOperandVector getDpsInputOperands()
 OpOperandVector getDpsInitOperands()
-	其中每个元素为 `OpOperand *` ，使用opOperand->get()即可得到alue
 ```
+
+其中每个元素为 `OpOperand *` ，使用opOperand->get()即可得到alue
 
 相关函数：
 
@@ -2255,7 +2271,6 @@ OpOperandVector getDpsInitOperands()
 3.isScalar
 
 `!llvm::isa<BaseMemRefType, TensorType>(opOperand->get().getType());`
-
 
 ## TilingInterface
 
@@ -2291,6 +2306,7 @@ if (auto intAttr = range.size.dyn_cast<Attribute>()) {
 ### EffectInstance
 
 `EffectInstance` 是描写 `MemoryEffects` 行为的对象，有四种
+
 - Allocate
 - Free : 对alloc resource的free行为
 - Read
@@ -2334,6 +2350,7 @@ copy op 有 read 和 write，其中 read 的 apply value 是A(读A), write 的 a
 - op.getEffect()
 
 一般传入一个 `SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>, 4>`
+
 ```cpp
 void mlir::MemoryEffectOpInterface::getEffects(::llvm::SmallVectorImpl<::mlir::SideEffects::EffectInstance<::mlir::MemoryEffects::Effect>> & effects) {
       return getImpl()->getEffects(getImpl(), getOperation(), effects);
@@ -2402,6 +2419,7 @@ return llvm::any_of(effects, [&](MemoryEffects::Effect effect) {
 - onlyHasEffect
 
 例如判断只有read effect
+
 ```cpp
 if (!isMemoryEffectFree(op)) {
   auto memEffects = dyn_cast<MemoryEffectOpInterface>(op);
@@ -2451,7 +2469,6 @@ mlir/include/mlir/Interfaces/ControlFlowInterfaces.td
 所以分支类型的op都继承了该interface，例如`cf.br`、`cf.cond_br`等。对它们的处理需要额外考虑其 `successors`。
 
 例子：collect blocks
-
 
 ```cpp
 SmallVector<Block *, 4> blocks;
@@ -2671,7 +2688,6 @@ if (extractionOp && insertionOp) {
 
 获得这个bbArg对应的loopInit，例如上面代码中 `%a` 对应的 loopInit 就是 `%empty0`
 
-
 ## SubsetOpInterface
 
 用法
@@ -2797,6 +2813,7 @@ memref.expand_shape, memref.collapse_shape, memref.view, memref.reshape, memref.
 - Value getViewSource()
 
 - 判断两个view是否相同
+
   ```cpp
   static bool isSameView(ViewLikeOpInterface a, ViewLikeOpInterface b) {
     if (a->getName() != b->getName() ||
@@ -2813,7 +2830,6 @@ memref.expand_shape, memref.collapse_shape, memref.view, memref.reshape, memref.
     return true;
   }
   ```
-
 
 ## OffsetSizeAndStrideOpInterface
 
@@ -2845,6 +2861,7 @@ if (prevInsertOp.isSameAs(insertOp, isSame))
 常见的alloc op都继承了该interface，常见 memref.alloc
 
 常用
+
 - Value getSource()
 - Value getTarget()
 
@@ -3071,20 +3088,21 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
       }, // 定义点，传递了一个lambda函数
 ```
 
-
-
 ## Array / Vector / Set / hash
 
 1.llvm:ArrayRef
+
 - **轻量级数组引用，不进行内存分配或拷贝，适用于对已有数组进行访问而不修改的场景，是一个只读工具**
 - 常传入SmallVector或std::vector构造
 - tips: `const &SmallVector` <==> `ArrayRef`
 
 2.llvm:SmallVector
+
 - SmallVector<int64_t> srcDims(2, 1) 表示 初始化了两个元素，每个元素的值都是 `1`。
 - `SmallVector<int64_t, 2>` 表示包含 `int64_t` 元素的 `SmallVector` 类型，其中 `2` 是指定的初始大小
 - **tips:如果能预先知道需要的size，就使用reserve先分配**
 - 其他
+
   ```cpp
   llvm::reverse()
   llvm::to_vector()
@@ -3094,11 +3112,14 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
   ```
 
 3.llvm::SmallVectorImpl
+
 - SmallVector构造时调用的是 `SmallVector() : SmallVectorImpl<T>(N) {}`
 - 写一个以SmallVector为参数的函数，如果传入的元素个数是固定的，建议使用`SmallVectorImpl` 作为形参，来避免**对堆栈元素的隐式数量进行硬编码**
+
 > `SmallVector` 有一个参数 `N`表示该堆栈开辟了多少空间(元素)，函数上直接使用 `SmallVectorImpl`作形参能减少拷贝。 `SmallVectorImpl<Value> &`
 
 4.llvm::SetVector
+
 - 即有set的存储行为，又有vector的存储顺序
 - 常用方法
   - insert
@@ -3109,13 +3130,17 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
   - empty
 
 5.llvm:to_vector
+
 - 将数组类型的对象转为SmallVector，常用来解决用ArrayRef构造SmallVector
 - 用法
+
   ```cpp
   // 构造一个[0, 1, windowTy.getShape()-1]的数组
   SmallVector<int64_t> dstShape(llvm::to_vector(windowTy.getShape()));
   ```
+
 - 源码
+
   ```cpp
   template <typename R>
   SmallVector<ValueTypeFromRangeType<R>> to_vector(R &&Range) {
@@ -3133,11 +3158,13 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
   ```
 
 6.llvm::seq
+
 - 生成一个连续的序列，包含起始值，不包含结束值。 `seq_inclusive` 既包含起始值，也包含结束值。
 - 用法
     - 循环的范围 `for (auto idx : llvm::seq<int>(0, rank))`
     - 创建个连续的`SmallVector<int64_t> res{llvm::to_vector(llvm::seq((int64_t)0, size))};`
 - 源码
+
   ```cpp
   auto seq(T Begin, T End) {
     return iota_range<T>(Begin, End, false);
@@ -3148,34 +3175,40 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
   ```
 
 7.llvm:DenseSet
+
 - set和map都是基于hash的，都是无序的
 - 常用方法
   - insert(const ValueT &V)
+
     ```cpp
       // insert是有返回值
       std::pair<iterator, bool> insert(const ValueT &V)
       - first: 插入后的iterator
       - bool: 是否插入
     ```
+
   - erase(Iterator I)
   - count(const ValueT &V)
   - contains(const_arg_type_t<ValueT> V)
   > `using const_arg_type_t = typename const_pointer_or_const_ref<T>::type;`
 
-
 8.llvm:DenseMap
+
 - 和std::map类似， <key, value>
 - find(返回iterator) / lookup(返回value或null)
 - contains(返回true/false) / count(返回1/0)
 - std::pair<iterator, bool> insert / try_emplace : 返回值的second为true时，表示原本的map中不能找到key，已新插入一个<key, val>的pair，并以该pair的iterator作为返回值的first
+
   ```cpp
   launchInfo.insert({candidateOp, replacementIndexes})
   ```
 
 9.llvm::DenseMapInfo
+
 - hash表，只存key，`DenseMapInfo<T*>`
 - 使用 `getHashValue` 来获得hash值，最原始的方法是使用指针地址偏移计算的。但如果要实现自定义的hash，可以继承该类并重载 `getHashValue` 和 `isEqual` 方法
 - 例如：CSE中确定Op是否相同的代码
+
   ```cpp
   // mlir/lib/Transform/CSE.cpp
   struct SimpleOperationInfo : public llvm::DenseMapInfo<Operation *> {
@@ -3203,26 +3236,32 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
   ```
 
 10.llvm::ScopedHashTable
+
 - 需要包含 key, value, keyInfo, AllocatorTy 四个参数，例如 CSE.cpp 中构造该类型:
+
   ```cpp
   using ScopedMapTy = llvm::ScopedHashTable<Operation *, Operation *,
       SimpleOperationInfo, AllocatorTy>
   // SimpleOperationInfo 继承自 DenseMapInfo<Operation *>
   // using AllocatorTy = llvm::RecyclingAllocator<llvm::BumpPtrAllocator, llvm::ScopedHashTableVal<Operation *, Operation *>>;
   ```
+
 - 实例化 `using ScopeTy = ScopedHashTableScope<K, V, KInfo, AllocatorTy>;`
+
   ```cpp
   ScopedMapTy::ScopeTy scope(knownValues);
   ```
+
 - 使用函数
   - V lookup(K key) : 在其中尝试查找key。一般来说 `SimpleOperationInfo` 都会有有自己的 `getHashValue` 和 `isEqual` 函数，这样就能根据key找到对应的value
-
 
 ## make_range
 
 1.llvm::map_range
+
 - 将一个range映射到另一个range
 - 用法
+
   ```cpp
   // 将 srcDims 中的每个元素都乘以2
   auto res = llvm::map_range(srcDims, [&](int64_t dim) { return dim * 2; });
@@ -3231,7 +3270,9 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
   assert(llvm::all_equal(llvm::map_range(op.getOperandTypes(),
       [](Type t) { return t.cast<TensorType>().getShape(); })));
   ```
+
 - 源码
+
   ```cpp
   template <typename ContainerTy, class FuncTy>
   auto map_range(ContainerTy &&C, FuncTy F) {
@@ -3246,8 +3287,10 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
   ```
 
 2.llvm::make_early_inc_range
+
 - 允许range中的元素被修改，且不影响iterator。例如遍历DenseMap对符合条件的iterator进行erase
-```
+
+```cpp
   for (Block *block : llvm::make_early_inc_range(blockVec)) {
     ... // earse/replace ops in block
   }
@@ -3276,6 +3319,7 @@ tip: 如果需要在循环中查找，建议使用 `DenseSet`, `DenseMap` 类数
 - llvm:TypeSwitch
 
 常用在模板输入的pattern中，某些op需要额外的处理，例如构建某些op的时候需要额外set一些属性
+
 ```cpp
 auto newOp = clone(rewriter, op, TypeRange{newResType}, newOperands);
 auto inWhiteList = llvm::TypeSwitch<Operation *, bool>(newOp)
@@ -3297,11 +3341,12 @@ auto inWhiteList = llvm::TypeSwitch<Operation *, bool>(newOp)
     .Default([&](Operation *noNeedUpdate) { return false; });
 ```
 
-
 ## STL_Extra func
 
 1.llvm::count_if
+
 - 用法
+
   ```cpp
   llvm::count_if(inputs.getType(), [](Type type) {
     return type.isa<ShapedType>();
@@ -3311,7 +3356,9 @@ auto inWhiteList = llvm::TypeSwitch<Operation *, bool>(newOp)
     return containingOp->isAncestor(op);
   });
   ```
+
 - 实现
+
   ```cpp
   template <typename R, typename UnaryPredicate>
   auto count_if(R &&Range, UnaryPredicate P) {
@@ -3320,15 +3367,19 @@ auto inWhiteList = llvm::TypeSwitch<Operation *, bool>(newOp)
   ```
 
 2.llvm::transform
+
 - 对一个range应用特殊的方法
 - 使用
+
   ```cpp
   llvm::transform(srcDims, std::back_inserter(resDims)
   [&](int64_t dim) { return dim * 2; });
   ```
 
 3.llvm::hasSingleElement
+
 - 使用
+
   ```cpp
     auto containingOps = state.getPayloadOps(getContainingOp());
     if (!llvm::hasSingleElement(containingOps)) {
@@ -3338,7 +3389,9 @@ auto inWhiteList = llvm::TypeSwitch<Operation *, bool>(newOp)
     }
     Operation *containingOp = *containingOps.begin();
   ```
+
 - 实现
+
   ```cpp
   template <typename ContainerTy>
   bool hasSingleElement(ContainerTy &&C) {
@@ -3348,6 +3401,7 @@ auto inWhiteList = llvm::TypeSwitch<Operation *, bool>(newOp)
   ```
 
 4.drop_begin / drop_end
+
 ```cpp
 template <typename T>
 auto drop_begin(T &&RangeOrContainer, size_t N = 1) {
@@ -3359,9 +3413,11 @@ auto drop_begin(T &&RangeOrContainer, size_t N = 1) {
 ```
 
 ## setOperation
+
 ```cpp
 llvm/include/llvm/ADT/SetOperations.h
 ```
+
 - llvm::set_union(A, B): 计算集合A与集合B的并集，并将结果赋值给集合A
 - llvm::set_intersection(A, B): 计算集合A与集合B的交集，并将结果赋值给集合A
 - llvm::set_subtract(A, B): 计算集合A与集合B的差集（在A中但不在B中），并将结果赋值给集合A
@@ -3384,6 +3440,7 @@ mlir/include/mlir/IR/Matchers.h
 auto val = getValueOrCreateConstantIndexOp(...)
 if (mathPattern(val, m_Zero())) // 判断 val 是否是立即数0 或 constant(0)
 ```
+
   - `matchPattern(val, m_Zero())`
 - matchPattern(Operation *, Pattern)
 - matchPattern(Attribute, Pattern)
@@ -3535,6 +3592,7 @@ mlir/lib/IR/Operation.cpp
   - getParentOp()：返回该operation的最近的上一级op
       如果要判断某个op的父op就用该方法
   - getParentOfType<OpTy>()：返回该operation的最近的上一级的为OpTy的op
+
     ```cpp
     template <typename OpTy>
     OpTy getParentOfType() {
@@ -3710,11 +3768,13 @@ create<OpTy>(…) : 查看
 2.根据operationState来create
 
 create(OperationState state)
+
 ```cpp
 OperationState state(op->getLoc(), op->getName().getStringRef(), operands,
                      newResults, op->getAttrs(), op->getSuccessors());
  Operation *newOp = rewriter.create(state);
 ```
+
 使用 `OperationState` 可以用来写一些模板函数pattern或者 `TypeConvert` 的naive_pattern，创建op会更加简单
 
 例: 当op的mask来自于特殊情况，将起专为 `scf.if` + `op` 的形式
@@ -3834,6 +3894,7 @@ public:
 - 直接包起来`OpFoldResult{b.getI64IntegerAttr(1)}`
 
 - 使用 `getAsOpFoldResult` 函数
+
   ```cpp
   OpFoldResult getAsOpFoldResult(Value val);
   SmallVector<OpFoldResult> getAsOpFoldResult(ValueRange values);
@@ -3863,6 +3924,7 @@ OpFoldResult LogOp::fold(FoldAdaptor adaptor) {
 3.getAsOpFoldResult(ValueRange values)
 
 遍历values，尝试将value转化为constant Attribute，如果失败则返回value
+
 ```cpp
 Attribute attr;
 if (matchPattern(value, m_Constant(&attr)))
@@ -3900,7 +3962,6 @@ mlir/include/mlir/Dialect/PDL/IR/PDLTypes
 常见用法
 
 `auto pdlOpType = pdl::OperationType::get(context);`
-
 
 用pdll来实现pattern的match和rewrite
 
@@ -4596,6 +4657,7 @@ def FuseIntoContainingOp :
 ```
 
 - `FuseIntoContainingOp` 继承自 `Op`，这是所有op的基类，实现了一些共有的方法
+
   ```cpp
   template <typename ConcreteType, template <typename T> class... Traits>
   class Op : public OpState, public Traits<ConcreteType>... {
@@ -4612,6 +4674,7 @@ def FuseIntoContainingOp :
 使用 [DeclareOpInterfaceMethods](https://reviews.llvm.org/D79030?id=261051) 声明的interface时需要**被重写覆盖**，而其他都是默认继承（采用默认实现）。
 
 - `builders` 用来声明一个op的builder。这里只是声明好了接口，要在其对应的文件中写一下实现
+
   ```cpp
   void transform::FuseIntoContainingOp::build(OpBuilder &builder,
                                               OperationState &result,
@@ -4649,8 +4712,10 @@ scf.forall
 %extract = tensor.extract %1 // c 点
 ```
 
----
+> tensor 语义中只赋值域一次的行为，和 SSA 的定义有点相似
+> SSA IR 要求每个变量只能有一次值域，且使用前需要先定义
 
+---
 
 # test
 
@@ -4785,6 +4850,7 @@ if (op->hasTrait<OpTrait::IsTerminator>()) {
 - IsIsolatedFromAbove ：表示该op不会读取或修改其父操作的任何值，有这个trait的op是不能被schedule的
 
 找到op的符合条件的parentOp作为基点来计算liveness，带有该 trait 的op一般可以理解为是 `isolateOp`
+
 ```cpp
 Liveness liveness(op->getParentWithTrait<OpTrait::IsIsolatedFromAbove>());
 Block *block = op->getBlock();
@@ -4845,11 +4911,14 @@ public:
 
 - getPayloadOps : 返回给定operand的对应payloadOps。当transform ir应用在特定的handle使用
   - 定义
+
     ```cpp
     auto getPayloadOps(Value value) const {
         ArrayRef<Operation *> view = getPayloadOpsView(value);
     ```
+
   - 使用
+
     ```cpp
     auto targetOps = state.getPayloadOps(getTarget())
     auto producerOps = state.getPayloadOps(getProducerOp());
@@ -4857,6 +4926,7 @@ public:
     ```
 
 - `ArrayRef<Attribute> getParams(Value value)` : 返回传入transform ir中，给定operand对应的参数(都是以Attribute的形式传入的，例如tile_size)
+
   ```cpp
     auto tileSizeIntAttr = tileSizeAttr.dyn_cast_or_null<IntegerAttr>();
     if (!tileSizeIntAttr)
@@ -4882,7 +4952,6 @@ ir中可能包含多个同名op，所以opIndexing来锁定handle
 
 继承了 `TilingInterface` 的op都可以进行tile，每个可以tile的维度属于parallel或reduction
 
-
 - transform.structured.tile_reduction_using_forall
 
 - transform.structured.tile_using_forall
@@ -4902,11 +4971,13 @@ Value 必然包含 Type，Type 也可以作为 Attribute 附加在 Operation 上
 ## 常见类型
 
 1.ShapedType
+
 - ShapedType::kDynamic 用于判断某个数不是 `?`
 - isDynamicDim(i)
 - 当Type满足 `!llvm::isa<BaseMemRefType, TensorType>(type)` 时，认为该type是个scalar
 
 2.TensorType
+
 - kind: RankedTensorType / UnrankedTensorType
 - function:
   - hasRank() -> bool
@@ -4916,6 +4987,7 @@ Value 必然包含 Type，Type 也可以作为 Attribute 附加在 Operation 上
   - clone(ArrayRef<int64_t> shape, Ttpe elemType) -> RankedTensorType
 
 3.BaseMemRefType
+
 - kind: MemRefType / UnrankedMemRefType
 - function: 大部分和 TensorType 相同，继承自 ShapedType的
   - clone(ArrayRef<int64_t> shape, Ttpe elemType) -> MemRefType
@@ -4923,9 +4995,11 @@ Value 必然包含 Type，Type 也可以作为 Attribute 附加在 Operation 上
   - getMemorySpaceAsInt -> unsigned
 
 3.MemRefType
+
 - getLayout() -> MemRefLayoutAttrInterface
   - isIdentity() : result type has no offset.
 - 获得dim
+
   ```cpp
       SmallVector<Value, 4> dynamicOperands;
       for (int i = 0; i < memrefType.getRank(); ++i) {
@@ -4935,6 +5009,7 @@ Value 必然包含 Type，Type 也可以作为 Attribute 附加在 Operation 上
         dynamicOperands.push_back(dim);
       }
   ```
+
 - getStridesAndOffset(MemRefType t, SmallVectorImpl<int64_t> **&**strides, int64_t **&**offset)
 - canonicalizeStridedLayout(MemRefType t) -> MemRefType : 标准化t的layout格式，如果能canonicalize成静态的就没问题，否则返回MemRefType的layout将是affineMap的形式
 
@@ -5065,7 +5140,6 @@ WalkResult ret = a.walk([&](Ty opOfTy) -> WalkResult {
 
 mlir的代码一般都得准守clang的format，简单的话可以使用 `clang-format` 工具
 
-
 - 设置代码界限标识
 
 一般clang format以80字符为换行界限，所以可以在vscode中设置显示提示竖线
@@ -5138,6 +5212,7 @@ void func(ArrayRef<Operation> input);
 ```cpp
 for (size_t i = 0; i < a.size(); ++i)
 ```
+
 - 如果有需要使用 `i` 和 `int64_t`类型比较的时，就用 `static_cast<int64_t>(i)`
 - 也可以一开始就将循环变量定义为 `int64_t` （推荐）
 
@@ -5146,6 +5221,7 @@ for (int64_t i = 0; i < static_cast<int64_t>(a.size()); ++i)
 ```
 
 - 迭代变量i推荐使用 `++i`
+
 > `i++` 可能会产生一个临时变量来保留前值，而 `++i` 并不会有这样的开销。虽然现代编译器一般能消除此类影响。
 {: .prompt-info }
 

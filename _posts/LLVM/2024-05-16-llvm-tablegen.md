@@ -168,8 +168,8 @@ class persionInBJ<string name_, int age_> : Location<"BJ"> {
 
 ```cpp
 def rec{
-	int a=1;
-	string b="tbl is fun";
+ int a=1;
+ string b="tbl is fun";
 }
 ```
 
@@ -177,12 +177,12 @@ def rec{
 
 ```cpp
 class MyInstr{
-	string asmname;
-	bits<32> encoding;
+ string asmname;
+ bits<32> encoding;
 }
 def ADD: MyInstr{
-	let asmname="add";
-	let encoding{31-26}=1;
+ let asmname="add";
+ let encoding{31-26}=1;
 }
 ```
 
@@ -231,6 +231,7 @@ defm int_xxx_masked_atomicrmw_sub : MaskedAtomicRMWFourArgIntrinsics;
 ```
 
 其中:
+
 - `multiclass` : 定义具有两种数据类型的atomic指令
 - `defm` : 实例化 `multiclass` 中所有的记录，每个记录名称为 `defm` 的名字和 `multiclass` 中的 `def` 的名字相拼接，如
 
@@ -298,6 +299,7 @@ if !lt(grades[i], 60) then {
   def _#clses[i]: Person<name>, Grade<grades[i]>;
 }
 ```
+
 # 实例
 
 ## 参数类型
@@ -365,6 +367,9 @@ defm add : XXXBinaryOp;
 ```
 
 # 参考
-* [TableGen Overview](https://llvm.org/docs/TableGen/index.html)
-* [LLVM后端：TableGen简易入门](https://zhuanlan.zhihu.com/p/625227861)
-* [快速入门TableGen](https://csstormq.github.io/blog/LLVM%20%E4%B9%8B%E5%90%8E%E7%AB%AF%E7%AF%87%EF%BC%881%EF%BC%89%EF%BC%9A%E9%9B%B6%E5%9F%BA%E7%A1%80%E5%BF%AB%E9%80%9F%E5%85%A5%E9%97%A8%20TableGen)
+
+- [TableGen Overview](https://llvm.org/docs/TableGen/index.html)
+
+- [LLVM后端：TableGen简易入门](https://zhuanlan.zhihu.com/p/625227861)
+
+- [快速入门TableGen](https://csstormq.github.io/blog/LLVM%20%E4%B9%8B%E5%90%8E%E7%AB%AF%E7%AF%87%EF%BC%881%EF%BC%89%EF%BC%9A%E9%9B%B6%E5%9F%BA%E7%A1%80%E5%BF%AB%E9%80%9F%E5%85%A5%E9%97%A8%20TableGen)

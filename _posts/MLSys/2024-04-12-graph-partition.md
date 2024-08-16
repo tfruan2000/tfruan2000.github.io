@@ -24,7 +24,7 @@ tags: [AI Compiler, Graph Partition]
 
 手写一些融合的pattern，例如：`conv2d + relu`，`conv2d + bn + relu`，`conv2d + bn + relu + pool`等，常见让计算密集型和访存密集型算子融合，减小整体执行开销。针对特定场景有较好的收益，但泛化性较差（总不能手动枚举所有优化可能吧，总得编译时间和性能trade-off）
 
-> 推荐两篇讲访存和计算的知乎文章：https://zhuanlan.zhihu.com/p/600489819, https://zhuanlan.zhihu.com/p/688613416
+> 推荐两篇讲访存和计算的知乎文章：<https://zhuanlan.zhihu.com/p/600489819>, <https://zhuanlan.zhihu.com/p/688613416>
 
 ### XLA
 

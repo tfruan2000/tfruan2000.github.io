@@ -48,7 +48,6 @@ tags: [Triton, Linalg]
 
 简单来说，`triton` 可以让大家用更少的时间获得较为不错的性能，来验证自己的想法，深受现在学界的喜爱。当然工业界一些很好的 triton 工作了，例如 [lightllm](https://github.com/ModelTC/lightllm)中有很多用triton实现的kernel。
 
-
 - triton-linalg
 
 [triton-linalg](https://github.com/Cambricon/triton-linalg) 顾名思义，是**为triton(dialect)下降到linalg(dialect)提供了一条可行的路线**。如果大家看过 `triton` 的源码就会发现目前它的下降行为十分直接，一个猛子完成 `triton dialect->triton gpu dialect->llvm`(见[triton conversion](https://github.com/triton-lang/triton/tree/main/lib/Conversion))，在这些转换中分布着一些gpu硬件特有的trick保证来codegen出的ir性能不错。
@@ -107,7 +106,6 @@ tags: [Triton, Linalg]
 
 - triton-linalg: 指针会使用`llvm.inttoptr`  转为 `llvm.ptr` (和 `triton` [官方一致](https://github.com/triton-lang/triton/blob/main/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L792))-> 通过`AxisInfoAnalysis`计算出 `strides,shapes,offset`，使用 `aux.view` 将`llvm.ptr`转成数据实际存放的memref -> 通过 `bufferization.to_tensor` 转为tensor语义下的操作，再使用 `linalg.copy`(连续访存) 或 `linalg_ext.gather`(离散访存) 来获取数据
 
-
 # 环境配置
 
 - clone
@@ -128,15 +126,17 @@ conda install pytorch torchvision # 我也不确定需不需要，反正cpu的�
 ```
 
 - 相关工具
-按照 https://github.com/Cambricon/triton-linalg README 内容进行环境配置和编译
+按照 [Triton-Linalg](https://github.com/Cambricon/triton-linalg) README 内容进行环境配置和编译
 
 由于我是在 macOS 上编译，所以直接通过 `brew` 安装了相关工具
+
 ```bash
 brew install cmake ninja-build ccache clang lld
 conda install pytest-xdist cython # 记得要装cython
 ```
 
 正常在 linux 下使用 `apt-get` 安装相关工具链即可
+
 ```bash
 python3 -m pip install --upgrade pip
 python3 -m pip install cmake ninja pytest-xdist cython # 这样装的cmake版本目前是3.26
@@ -145,6 +145,7 @@ sudo apt-get install -y ccache clang lld
 ```
 
 - 编译
+
 ```bash
 # macos中lld是不能work的，所以不要添加相关的编译选项，在linux下就没问题
 #TRITON_BUILD_WITH_CLANG_LLD=true TRITON_BUILD_WITH_CCACHE=true pip install -e python --no-build-isolation -vvv
@@ -180,6 +181,7 @@ ctrl + p 输入 clangd，先点击 下载language server；然后 加 settings.j
 ```
 
 加个环境变量，方便使用
+
 ```bash
 export PATH=xxx/triton-linalg/triton/python/build/{current_cmake_version}/third_party/triton_linalg/bin:$PATH
 ```
@@ -211,7 +213,6 @@ dumps the IR before every MLIR pass Triton runs
 ## 一窥ttir
 
 `triton-llinalg-opt` 真正能吃下的输入并不是 python，而是 `ttir` (triton ir)，可以理解成一般性流程是 python -> ttit -> linalg / gpu dialect -> llvm
-
 
 以 `tutorials/03-matrix-multiplication.py` 为例，输入：
 
@@ -917,6 +918,7 @@ module {
 # Dialect
 
 `triton-linalg` 中新增的自定义 `dialect` 最重要的是 [Auxiliar](https://github.com/Cambricon/triton-linalg/tree/master/include/triton-linalg/Dialect/Auxiliary) 和 [LinalgExt](https://github.com/Cambricon/triton-linalg/tree/master/include/triton-linalg/Dialect/LinalgExt)，也为新增 `dialect` 提供了一个很好的范本：
+
 - 自定义op
 - 为op实现`TilingInterface`
 - 为dialect挂`DialectInlinerInterface`
@@ -1124,6 +1126,7 @@ rewriter.create<aux::StoreResourceOp>(op.getLoc(), to, from);
 ```
 
 指针相关的处理逻辑主要在，结合 op conversion 过程理解更好，所以后文遇见再讲。
+
 ```bash
 include/triton-linalg/Dialect/Triton/Utils/PointerMetaInfoTracker.h
 lib/Dialect/Triton/Utils/PointerMetaInfoTracker.cpp
@@ -1165,6 +1168,7 @@ lib/Dialect/Auxiliary/Transforms/AuxOpTilingInterface.cpp
 ```
 
 可以了解到为一个自定义的op定义它的 `TilingInterface` 需要重新实现以下函数，感兴趣的同学可以深入学习。
+
 - getDestinationOperands
 - getLoopIteratorTypes
 - getIterationDomain
@@ -1193,6 +1197,7 @@ LinalgExt 新定义了挺多 op，这里只大概介绍当前在 `triton-linalg`
 %c128_i32 = arith.constant 128 : i32
 %range = linalg_ext.make_range {operandSegmentSizes = array<i32: 2, 1>} ins(%c0_i32, %c128_i32 : i32, i32) outs(%21 : tensor<128xi32>) -> tensor<128xi32>
 ```
+
 用来承接 `tt.make_range` 的下降。
 
 ```
@@ -1206,6 +1211,7 @@ linalg: %range = linalg_ext.make_range {operandSegmentSizes = array<i32: 2, 1>} 
 gather 是一种将非连续内存位置的数据收集到连续内存位置的操作。`linalg_ext.gather` 的输入一般为 2个(input, indices) 或 3个(input, indices, mask)。
 
 `LinalgExtOps.td` 中描述到这些operand相互关系关系为
+
 ```md
 - Input has shape [i0, i1, ..., in-1]
 - indice has shape [Batch0, Batch1, ..., Batchm-1, k]
@@ -1221,6 +1227,7 @@ gather 是一种将非连续内存位置的数据收集到连续内存位置的�
 ```
 
 计算行为：
+
 ```cpp
 for (i0 = 0; i0 < Batch0; ++i0) {
   ...
@@ -1269,6 +1276,7 @@ for (i0 = 0; i0 < Batch0; ++i0) {
 `scatter` 是一种将连续内存位置的数据分散到非连续内存位置的操作。与 `linalg_ext.gather` 相似，gather和scatter可以看作是语义相反的两个操作，`linalg_ext.scatter` 的输入一般为 2个(update, indices) 或 3个(update, indices, mask)。
 
 `LinalgExtOps.td` 中描述到这些operand的shape关系为
+
 ```md
 - update
   - shape [Batch0, Batch1, ..., Batchm-1, window0, ..., windown-1]
@@ -1285,6 +1293,7 @@ for (i0 = 0; i0 < Batch0; ++i0) {
 ```
 
 计算行为：
+
 ```cpp
     for (i0 = 0; i0 < Batch0; ++i0) {
       ...
@@ -1525,6 +1534,7 @@ arith.constant dense<0.0> : tensor<axf32>
 ## tt.ops
 
 代码中包含了很多 `triton.ops` 的下降 `pattern`，除了 `atomic` 以及 `load, store`。这节也只介绍除 `atomic/load/store` 之外的 `tt.ops` 下降 `pattern`。
+
 ```bash
 lib/Conversion/TritonToLinalg/TritonToLinalg.cpp
 ```
@@ -1547,7 +1557,6 @@ tensor<256x!tt.ptr<f32>> -> tensor<256xi64>
 ```
 
 > 虽然这样不管 `!tt.ptr` 中的 `elemType` 直接转为 `i64` 导致现在损失了 `elemType` 信息，但是在 `LoadStoreConversion` 时会直接使用 `tt.load` 的 `resultType` 的 `elemType`。
-
 
 - tt.func / tt.return / tt.call
 
@@ -1834,6 +1843,7 @@ tt.precise_sqrt / tt.precise_divf 直接下降到 math.sqrt / math.divf， `tt.m
 首先判断是否是 `TensorPointerType`。
 
 > PointerType 的一些形式：
+>
 > - !tt.ptr<f32>
 > - !tt.ptr<<2xf32>>  这就是 TensorPointerType
 > - !tt.ptr<!tt.ptr<f32>>
@@ -1897,7 +1907,6 @@ if (mask) {
 
 > 当 `arith.cmpi` 和 `arith.select` 是用来做计算 mask 时，可以将 `arith.cmpi` 转为 `maxsi + minsi + fill(%true) + pad` 的格式，将 `arith.select` 转为 `tensor.extract_slice + pad` 的格式，直接获取信息。
 
-
 ## summary
 
 依然以上文 `tutorials/03-matrix-multiplication.py` 的例子作总结：
@@ -1914,7 +1923,6 @@ if (mask) {
 | BLOCK_SIZE_M,  BLOCK_SIZE_N, BLOCK_SIZE_K | 128, 64, 64         |
 | GROUP_SIZE_M                              | 8                   |
 | ACTIVATION                                | None                |
-
 
 op-to-op conversion summary:
 
@@ -1947,6 +1955,7 @@ op-to-op conversion summary:
 | tt.histogram                                   | 比较 naive 的拼接实现，后续会改为 linalg_ext.histogram             |
 
 代码中构造 `tensor.empty` 作为输出时，很多都是使用
+
 ```cpp
 Value init = rewriter.create<tensor::EmptyOp>(loc, resultTy.getShape(),
                                               resultTy.getElementType());
@@ -1960,9 +1969,8 @@ Value init =
 rewriter.create<tensor::EmptyOp>(loc, initDims, resultTy.getElementType());
 ```
 
-
-
 # Pipeline
+
 一些优化transform pass
 
 # 结语
