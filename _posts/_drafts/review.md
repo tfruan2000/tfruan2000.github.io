@@ -126,11 +126,22 @@ Hopper在L1和L2之间加了SM-2-SM Network，实现SM1可以访问SM2的L1 Cach
 3. MLIR提供了两个tablegen模块，即：ODS和DRR。
 ODS：统一Dialect，Operation等Dialect内部类的创建；DRR：统一Canonicalization, Transformation和Conversion的创建，即PatternRewritter的管理（除此之外，也提供对Pass的管理）。
 
-4.canonicalize
+4. canonicalize
 
 The goal of canonicalize is to make analysis and optimization more efficient, performance improvement is not the goal
 
 Canonicalize shouldn't lose the semantic of original operation:
+
+5. 优化
+
+- broadcast + transpose -> transpose -> broadcast
+
+- transpose + transpose -> transpose
+  - 前后 transpose 之间再夹着某些 op(map)
+
+- fold unit dim (把需要在片上进行计算的op退化为shape变化)
+  - broadcast(3200 -> 1x3200) -> collapse_shape + expand_shape
+  - reduce(1x3200x1 -> 3200) -> collapse_shape + map + expand_shape
 
 # LLM note
 

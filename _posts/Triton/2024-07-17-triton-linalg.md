@@ -24,8 +24,6 @@ tags: [Triton, Linalg]
 
 关于 Triton-Linalg 项目技术细节 主要还是在后三节 `Analysis` , `Conversion` 以及 `Pipeline`，但目前还没整理好（还没时间看qwq），闲暇时再继续总结下。本人知识深度有限，还望大家指正~
 
-# 介绍
-
 # what's this
 
 - linalg
@@ -145,6 +143,8 @@ sudo apt-get install -y ccache clang lld
 ```
 
 - 编译
+
+注意，编译的时候需要进入 `triton-linalg/triton` 文件夹
 
 ```bash
 # macos中lld是不能work的，所以不要添加相关的编译选项，在linux下就没问题
@@ -1200,7 +1200,7 @@ LinalgExt 新定义了挺多 op，这里只大概介绍当前在 `triton-linalg`
 
 用来承接 `tt.make_range` 的下降。
 
-```
+```python
 triton language: tl.arange(0, BLOCK_SIZE_M)
 ttir: %range = tt.make_range {end = 128 : i32, start = 0 : i32} : tensor<128xi32>
 linalg: %range = linalg_ext.make_range {operandSegmentSizes = array<i32: 2, 1>} ins(%c0_i32, %c128_i32 : i32, i32) outs(%21 : tensor<128xi32>) -> tensor<128xi32>
@@ -1213,17 +1213,18 @@ gather 是一种将非连续内存位置的数据收集到连续内存位置的�
 `LinalgExtOps.td` 中描述到这些operand相互关系关系为
 
 ```md
-- Input has shape [i0, i1, ..., in-1]
-- indice has shape [Batch0, Batch1, ..., Batchm-1, k]
+- input has shape [i0, i1, ..., in-1]
+- indices has shape [Batch0, Batch1, ..., Batchm-1, k]
+  - 一共有 [Batch0, Batch1, ..., Batchm-1] 组 indice
+  - 每组 indice 有 k 个数： [idx0, idx1, ..., dixk]，所以 k 一定不能为 dynamic
 - mask has shape [Batch0, Batch1, ..., Batchm-1]
 
 - init
   - shape [Batch0, Batch1, ..., Batchm-1, o0, o1, ..., on-1].
   - rank >= 2
-  - mask 和 init 的 `前 indice.getRanke() - 1`(又称batchNum) 个数相同
+  - mask 和 init 的 `前 indices.getRanke() - 1`(又称batchNum) 个 dimSize 相同
   - init[idx + batchNum] <= inputType[idx]
-
-- dimension_map.size() = indice.back() = k, k不能为dynamic
+  - init 是从 input 中提取出 [Batch0, Batch1, ..., Batchm-1] 组 形状为 [o0, o1, ..., on-1] 的数据
 ```
 
 计算行为：
@@ -1231,9 +1232,9 @@ gather 是一种将非连续内存位置的数据收集到连续内存位置的�
 ```cpp
 for (i0 = 0; i0 < Batch0; ++i0) {
   ...
-  for (im-1 = 0; im-1 < Batchm-1; ++im-1) {
-    indice = indice[i0, ..., im-1];
-    if (mask[i0, ..., im-1]) {
+  for (im-1 = 0; im-1 < Batchm-1; ++im-1) { // [Batch0, Batch1, ..., Batchm-1] 组
+    indice = indices[i0, ..., im-1]; // 每组 indice 数据为 k 个数，即 [idx0, idx1, ..., dixk]
+    if (mask[i0, ..., im-1]) { // 判断该组是否需要被 mask
       // if region is empty, only copy will apply on init.
       computation(input[indice], init[i0, ..., im-1]);
     }
@@ -1241,7 +1242,22 @@ for (i0 = 0; i0 < Batch0; ++i0) {
 }
 ```
 
-算子表示
+此时，`linalg_ext.gather` 还有一个 `dimension_map` 参数，我理解这是给 indice 做 transpose 的。即给长度为 k 的数组 [idx0, idx1, ..., dixk]做 permutation(或者说是索引)。所以 `dimension_map` 存在约束 `dimension_map.size() = k`，需要包含真实使用的 `realIndice` 相对 indice 的排布。后续在 `computation(input[indice], init[i0, ..., im-1])` 的计算过程，用的就是该 realIndice。
+
+```cpp
+SmallVector<int64_t> realIndice(n);
+for (int i = 0; i < dimension_map.size(); ++i) {
+  realIndice[dimension_map[i]] = indice[i];
+}
+// 例如 dimension_map = [1, 0], indice = [4, 2]，计算得到 realIndice = [2, 4]
+```
+
+> 其实在 `Triton-Linalg` 项目中 build `linalg_ext.gather` 时，直接给定了 `dimension_map = [0]`，也就是说这个参数相当于不起作用，没有对 indice 进行 transpose。
+{: .prompt-info }
+
+`linalg_ext.gather` 算子可以看作 [hlo.gather](https://openxla.org/xla/operation_semantics#gather) 的子集，`linalg_ext.gather` 的 `dimension_map` 属性可以对应到 [hlo.gather](https://openxla.org/xla/operation_semantics#gather) 中的 `start_index_map` 属性。这个属性是用来索引 `indice`。
+
+算子表示如下，下面的ir可以解释：有4组 indice，每组 indice 有1个数，每组 indice 用于 input(16x8) 中取出大小为 2x4 的数据块，组成输出 4x2x4。
 
 ```text
 %input: tensor<16x8xf32>
@@ -1273,7 +1289,7 @@ for (i0 = 0; i0 < Batch0; ++i0) {
 
 - linalg_ext.scatter
 
-`scatter` 是一种将连续内存位置的数据分散到非连续内存位置的操作。与 `linalg_ext.gather` 相似，gather和scatter可以看作是语义相反的两个操作，`linalg_ext.scatter` 的输入一般为 2个(update, indices) 或 3个(update, indices, mask)。
+`scatter` 是一种将连续内存位置的数据分散到非连续内存位置的操作。其 `operand` 与 `linalg_ext.gather` 相似，gather和scatter可以看作是语义相反的两个操作，`linalg_ext.scatter` 的输入一般为 2个(update, indices) 或 3个(update, indices, mask)。
 
 `LinalgExtOps.td` 中描述到这些operand的shape关系为
 
@@ -1281,6 +1297,7 @@ for (i0 = 0; i0 < Batch0; ++i0) {
 - update
   - shape [Batch0, Batch1, ..., Batchm-1, window0, ..., windown-1]
   - rank >= 2
+  - update 可以看成 [Batch0, Batch1, ..., Batchm-1] 组数据，每组数据 [window0, ..., windown-1]
 - indice has shape [Batch0, Batch1, ..., Batchm-1, k]
 - mask has shape [Batch0, Batch1, ..., Batchm-1].
 
@@ -1306,7 +1323,7 @@ for (i0 = 0; i0 < Batch0; ++i0) {
     }
 ```
 
-算子表示
+算子表示，具体不再赘述，根据 gather 一起理解
 
 ```text
 %update: tensor<4x2x4xf32>
@@ -1825,8 +1842,6 @@ tt.precise_sqrt / tt.precise_divf 直接下降到 math.sqrt / math.divf， `tt.m
 由于 tt.load 和 tt.store 的下降 pattern 比较多，所以单独拿出来讲。
 
 在 `triton-linalg/lib/Conversion/TritonToLinalg/LoadStoreConversion.cpp` 中定义了多种情况下的 conversion pattern，根据 pattern benefit 取分开。高 benefit 的 pattern 下降得到的 ir 理论上有更好的 performance。
-
->
 
 - benefit = 100
   - TritonContiguousLoadOpConversion, TritonContiguousStoreOpConversion

@@ -194,6 +194,7 @@ void select_sort(T arr[], const int len){
     }
 }
 ```
+
 # 搜索与回溯
 
 ## 深度优先 DFS
@@ -449,8 +450,8 @@ dp[i][j]表示将前i种物品装进限容量为j的背包可以获得的最大�
 
 ```cpp
 for(int i=1; i<=N; i++){
-	for(int j=1; j<=V; j++){
-		dp[i][j] = ...
+ for(int j=1; j<=V; j++){
+  dp[i][j] = ...
 ```
 
 1. 不装入第i件物品，即`dp[i−1][j]`；
@@ -504,7 +505,7 @@ void pack_01(){
 上述两个代码的数据初始化如下
 
 ```cpp
-		vector<int> vi(N+1, 0);
+  vector<int> vi(N+1, 0);
     vector<int> wi(N+1, 0);
     vi[0] = 0;
     wi[0] = 0;
@@ -558,7 +559,7 @@ void pack_full(){
 上述两个代码的数据初始化如下
 
 ```cpp
-		vector<int> vi(N+1, 0);
+  vector<int> vi(N+1, 0);
     vector<int> wi(N+1, 0);
     vi[0] = 0;
     wi[0] = 0;
@@ -648,7 +649,7 @@ void pack_multi(){
 上述两个代码的数据初始化如下
 
 ```cpp
-		vector<int> vi(N+1, 0);
+  vector<int> vi(N+1, 0);
     vector<int> wi(N+1, 0);
     vi[0] = 0;
     wi[0] = 0;

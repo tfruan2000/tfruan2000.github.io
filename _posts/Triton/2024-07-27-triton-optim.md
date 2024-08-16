@@ -493,12 +493,14 @@ class LayerNorm(torch.autograd.Function):
             )
         else:
             grid = lambda META: (min(triton.cdiv(M, META['BLOCK_ROW_SIZE']), MAX_GRID_NUM),)
+            # 每次 kernel 都要处理完整的 N
             input_backward_kernel[grid](
                 out_grad, x, weight, mean, rstd, in_grad, M, N,
             )
             weight_grad = torch.empty_like(weight)
             bias_grad = torch.empty_like(weight)
             grid = lambda META: (min(triton.cdiv(N, META['BLOCK_COL_SIZE']), MAX_GRID_NUM),)
+            # 每次 kernel 都要处理完整的 M
             weight_bias_backward_kernel[grid](
                 out_grad, x, mean, rstd, weight_grad, bias_grad, M, N,
             )
@@ -643,7 +645,17 @@ tl.store(mid_ptr + pid, res)
 
 需要注意的是，上述并行归约优化在`tl.reduce`下降过程完成更具泛化性。
 
-在拆时间片循环的时候，我们也可以注意到可以根据选择的 `tuning config` 提前判断是否需要循环，可以使用一个超参数来控制
+---
+
+# 结语
+
+## 最后的光
+
+自此，本文对 `Triton Kernel` 的优化行为只涉及**替换算子、合并kernel、拆时间片循环**等初步优化。并且上述优化还存在进一步的空间，例如
+
+- 在拆时间片循环的时候，我们也可以注意到可以根据选择的 `tuning config` 提前判断是否需要循环，可以使用一个超参数来控制
+
+我们以 `max_kernel` 为例
 
 ```python
 @triton.autotune(...)
@@ -653,39 +665,108 @@ tl.store(mid_ptr + pid, res)
     },
 )
 @triton.jit
-def prod_kernel_mid(
+def max_kernel(
     inp,
-    mid,
+    out,
     M,
     BLOCK_SIZE: tl.constexpr,
     ONE_TILE_PER_CTA: tl.constexpr
 ):
     pid = tl.program_id(0)
     block_start = pid * BLOCK_SIZE
-    mid_value = 0.0
+    res = other=-float("inf")
     if ONE_TIME_PER_CTA:
         offset = block_start + tl.arange(0, BLOCK_SIZE)
         mask = offset < M
-        inp_val = tl.load(inp + offset, mask=mask, other=1.0).to(tl.float32)
-        mid_value = tl.reduce(inp_val, axis=0, combine_fn=reduce_mul)
+        inp_val = tl.load(inp + offset, mask=mask, other=-float("inf")).to(tl.float32)
+        res = tl.max(inp_val)
     else:
-        _tmp = tl.full([BLOCK_SIZE], value=1.0, dtype=tl.float32)
+        _tmp = tl.full([BLOCK_SIZE], value=-float("inf"), dtype=tl.float32)
         num_jobs = tl.num_programs(axis=0)
         step = num_jobs * BLOCK_SIZE
         for off in range(block_start, M, step):
             offset = off + tl.arange(0, BLOCK_SIZE)
             mask = offset < M
-            inp_val = tl.load(inp + offset, mask=mask, other=1.0).to(tl.float32)
-            _tmp = _tmp * input_val
-        mid_value = tl.reduce(_tmp, axis=0, combine_fn=reduce_mul)
+            inp_val = tl.load(inp + offset, mask=mask, other=-float("inf")).to(tl.float32)
+            _tmp = tl.where(_tmp > _x, _tmp, _x)
+        res = tl.max(_tmp)
 
-    mid_ptr = mid + pid
-    tl.store(mid_ptr + pid, mid_value.to(inp_val.dtype))
+    tl.atomic_max(out, res.to(tl.float32))
 ```
 
----
+- 又或者，其实拆 M 的时候本来就不需要防止 M 轴越界，即不需要关于 M 的mask，直接根据 `pid` 去准确地为每个 kernel 分配需要处理的数据范围
 
-自此，本文对 `Triton Kernel` 的优化行为只涉及**替换算子、合并kernel、拆时间片循环**等初步优化，并不包含：
+上面的 prod kernel 最终将 inp 给 reduce 成一个数，那如果我们需要保留某个维度，而对剩下维度做 reduce 呢？即 256x65536 规模的输入，给 reduce 到 256x1 的输出。
+
+这时候，我们不仅需要拆 N (单次处理65536的数据过多)，也需要拆 M (减少总任务数量)。
+
+例如我们一共起 256 个任务，那么每个任务分配可以是
+
+| data per task | computation in kernel               |
+|---------------|-------------------------------------|
+| 1x65536       | 1 x `reduce(65536)->1` + store      |
+| 4x16384       | 4 x `reduce(16384)->1` + atomic_max |
+| 64x1024       | 64 x `reduce(1024)->1` + atomic_max |
+| ...           | ...                                 |
+
+明确了这点后，我们的 launch 函数内大致形式如下
+
+```python
+# shape = [M, 1]
+out = torch.full(shape, -float("inf"), dtype=torch.float32, device=inp.device)
+grid = lambda meta: (triton.cdiv(MAX_GRID_NUM, meta["NUM_BLOCK_N"]), meta["NUM_BLOCK_N"])
+max_kernel[grid](inp, out, M, N)
+```
+
+接下来修改 `max_kernel` 如下
+
+```python
+def cfggen():
+    block_nums = [1, 4, 16, 64, ...]
+    configs = [
+        triton.Config({"NUM_BLOCK_N": block_num}, num_warps=.., num_stages=..) for block_num in block_nums
+    ]
+    return configs
+
+@triton.autotune(configs=cfggen(), key=["N"])
+@triton.heuristics(
+    values={
+        "BLOCK_SIZE_N": lambda args: (args["N"] + args["NUM_BLOCK_N"] - 1) // args["NUM_BLOCK_N"],
+    },
+)
+@triton.jit
+def max_kernel(
+    inp,
+    out,
+    M,
+    N,
+    NUM_BLOCK_N: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr
+):
+    # 下文的注释以 inp(256x65536)，launch_grid = [4, 64, 1] 为例，每个 kernel 需要处理 (64x1024)
+    # 即 NUM_BLOCK_N = 64， BLOCK_SIZE_N = 1024
+    pid_m = tl.program_id(0)
+    pid_n = tl.program_id(1)
+    num_jobs = tl.num_programs(axis=0) # triton.cdiv(MAX_GRID_NUM, meta["NUM_BLOCK_N"])
+    row_per_job = (M + num_jobs - 1) // num_jobs # 每次处理 64 行
+
+    row_begin = pid_m * row_per_job
+    row_end = row_begin + row_per_job
+    if pid_m == (num_jobs - 1): # 注意末尾边界
+        row_end = M
+
+    for row_idx in range(row_begin, row_end): # 相当于这里要循环 64 次
+        off_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+        mask = off_n < N
+        offset = row_idx * N + off_n
+        inp_val = tl.load(inp + offset, mask=mask, other=-float("inf")).to(tl.float32)
+        res = tl.max(inp_val)
+        tl.atomic_max(out + row_idx, res)
+```
+
+## 期待
+
+最后，本文所描述的优化行为都比较 naive，并不包含：
 
 - 使用硬件特性优化
 - 修改lowering源码
