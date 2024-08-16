@@ -1,12 +1,41 @@
-# Ignore the contents of the _site directory
-_site/
+####################################
+######## OS generated files ########
+####################################
+.DS_Store
+.DS_Store?
+*.swp
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+ehthumbs.db
+Thumbs.db
 
-# Ignore the directory for local files during development
-local/
-
+####################################
+######## special files #############
+####################################
 # Ignore the Gemfile that is generated
 Gemfile.lock
-
 # Ingore files created by npm
 node_modules
 package-lock.json
+
+####################################
+############# packages #############
+####################################
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+####################################
+############# local file ###########
+####################################
+# Ignore the contents of the _site directory
+_site/
+# Ignore the directory for local files during development
+_local/

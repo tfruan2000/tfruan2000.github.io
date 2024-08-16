@@ -219,7 +219,7 @@ ProgramPoint 是 DataFlowAnalysis 中的基石，每次分析都是从一个 poi
 
 一直维护 `AnalysisState` 和 `ProgramPoint` 信息。
 
-> 在数据流分析中，用来描述数据数据流中信息的变化和融合的是 SemiLattice 理论。例如，在进行活跃性分析时，使用交半格可以跟踪不同数据流中变量活跃性的最小公共集合。参考[数据流分析](https://learn.lianglianglee.com/%E4%B8%93%E6%A0%8F/%E7%BC%96%E8%AF%91%E5%8E%9F%E7%90%86%E4%B9%8B%E7%BE%8E/28%20%E6%95%B0%E6%8D%AE%E6%B5%81%E5%88%86%E6%9E%90%EF%BC%9A%E4%BD%A0%E5%86%99%E7%9A%84%E7%A8%8B%E5%BA%8F%EF%BC%8C%E5%AE%83%E6%9B%B4%E6%87%82.md)
+> 在数据流分析中，用来描述数据数据流中信息的变化和融合的是 SemiLattice 理论。例如，在进行活跃性分析时，使用交半格可以跟踪不同数据流中变量活跃性的最小公共集合。这部分的内容可以参考南大《软件分析》课程的[数据流分析](https://www.bilibili.com/video/BV1oE411K79d/?vd_source=29858f685ca867d754c4c0b13af98cb4)。
 > 所谓 fixedpoint iteration 算法其实是利用了 SemiLattice 的特性，保证迭代过程中一定存在一个上界，即 fixpoint。
 {: .prompt-info }
 
