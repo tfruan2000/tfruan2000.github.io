@@ -1029,27 +1029,27 @@ mlir/lib/Dialect/Bufferization/IR/BufferizableOpInterface.cpp
 对于每个有 `BufferizableOpInterface` 的op都进行bufferize
 
 - 声明：mlir/include/mlir/Dialect/Bufferization/Transforms/Passes.td
-    - 先基于tensor的SSA use-def链进行原位分析来确认哪些operand可以**in-place bufferize**.（尽量减少alloc和copy, 提高性能）
-        - destination-passing style op（继承`DestinationStyleOpInterface` ）： 某一个**operand和dst的buffer可复用**，所以分配了该operand的buffer后，无需再分配dst的buffer：eg: %t0 = tensor.insert %f into %dest[%idx]， buffer(%t0)和buffer(%dest)是完全一致的；
-        - 非destination-passing style op：对每个OpOperand产生一个新的buffer allocation, eg：tensor.generate
-        - 所有新allocate的buffer后续都会deallocate，不然会内存泄露
-    - TensorCopyInsertion：对确定是**out-of-place的operands插入 copies**，insertTensorCopies()函数。
-    - 调用bufferize接口bufferize()函数来实现bufferize. bufferizeOp()函数。
-    - 函数签名的layout map由`function-boundary-type-conversion`选项单独控制，可选的参数有3种：`infer-layout-map`，`fully-dynamic-layout-map` and `identity-layout-map`， 默认是`infer-layout-map`。无法精确推测时，函数参数类型为fully dynamic layout maps。
-    - `bufferize-function-boundaries` 是一个用来对funcOp、returnOp、callOp进行bufferize的flag
-    - funcArg一般可以bufferize，除非有 `bufferization.writable = false`
+  - 先基于tensor的SSA use-def链进行原位分析来确认哪些operand可以**in-place bufferize**.（尽量减少alloc和copy, 提高性能）
+    - destination-passing style op（继承`DestinationStyleOpInterface` ）： 某一个**operand和dst的buffer可复用**，所以分配了该operand的buffer后，无需再分配dst的buffer：eg: %t0 = tensor.insert %f into %dest[%idx]， buffer(%t0)和buffer(%dest)是完全一致的；
+    - 非destination-passing style op：对每个OpOperand产生一个新的buffer allocation, eg：tensor.generate
+    - 所有新allocate的buffer后续都会deallocate，不然会内存泄露
+  - TensorCopyInsertion：对确定是**out-of-place的operands插入 copies**，insertTensorCopies()函数。
+  - 调用bufferize接口bufferize()函数来实现bufferize. bufferizeOp()函数。
+  - 函数签名的layout map由`function-boundary-type-conversion`选项单独控制，可选的参数有3种：`infer-layout-map`，`fully-dynamic-layout-map` and `identity-layout-map`， 默认是`infer-layout-map`。无法精确推测时，函数参数类型为fully dynamic layout maps。
+  - `bufferize-function-boundaries` 是一个用来对funcOp、returnOp、callOp进行bufferize的flag
+  - funcArg一般可以bufferize，除非有 `bufferization.writable = false`
 - 实现：mlir/lib/Dialect/Bufferization/Transforms/Bufferize.cpp
-    - struct OneShotBufferizePass {void runOnOperation() override }
-        - Configure type converter， 先获得 unknownTypeConversionOption：
-            - 若是LayoutMapOption::IdentityLayoutMap， bufferization::getMemRefTypeWithStaticIdentityLayout(tensorType, memorySpace)；
-            - 否则，只能是LayoutMapOption::FullyDynamicLayoutMap，bufferization::getMemRefTypeWithFullyDynamicLayout(tensorType,memorySpace);
-        - Configure op filter. 依据编译选项设置不可bufferize的op
-        - 依据编译选项是否激活bufferizeFunctionBoundaries确定调用哪个函数进行bufferize:
-            - 若激活了，runOneShotModuleBufferize(moduleOp, opt, &statistics)
-            - 反之，runOneShotBufferize(moduleOp, opt, &statistics)
-        - createCanonicalizerPass()
-        - createCSEPass()
-        - createLoopInvariantCodeMotionPass()
+  - struct OneShotBufferizePass {void runOnOperation() override }
+    - Configure type converter， 先获得 unknownTypeConversionOption：
+      - 若是LayoutMapOption::IdentityLayoutMap， bufferization::getMemRefTypeWithStaticIdentityLayout(tensorType, memorySpace)；
+      - 否则，只能是LayoutMapOption::FullyDynamicLayoutMap，bufferization::getMemRefTypeWithFullyDynamicLayout(tensorType,memorySpace);
+    - Configure op filter. 依据编译选项设置不可bufferize的op
+    - 依据编译选项是否激活bufferizeFunctionBoundaries确定调用哪个函数进行bufferize:
+      - 若激活了，runOneShotModuleBufferize(moduleOp, opt, &statistics)
+      - 反之，runOneShotBufferize(moduleOp, opt, &statistics)
+    - createCanonicalizerPass()
+    - createCSEPass()
+    - createLoopInvariantCodeMotionPass()
 - 示例：mlir/test/Dialect/Bufferization/Transforms/one-shot-module-bufferize-out-params.mlir, mlir/test/Dialect/Bufferization/Transforms/one-shot-module-bufferize.mlir
 
 2.transform IR : transform.bufferization.one_shot_bufferize 有很多可选的参数
@@ -1058,13 +1058,13 @@ mlir/lib/Dialect/Bufferization/IR/BufferizableOpInterface.cpp
 - {bufferize_function_boundaries = true }
 - 定义：mlir/include/mlir/Dialect/Bufferization/TransformOps/BufferizationTransformOps.td
 - 实现：transform.bufferization.one_shot_bufferize的代码：
-    - mlir/lib/Dialect/Bufferization/TransformOps/BufferizationTransformOps.cpp: transform::OneShotBufferizeOp::apply()函数，从transform IR提供的各个参数中获得OneShotBufferizationOptions options，之后主要调用
-        - runOneShotModuleBufferize()
-            - insertTensorCopies(moduleOp, options)
-            - bufferizeOp() 会调用`BufferizableOpInterface::bufferize()`函数来对每个op进行具体的bufferize
-        - runOneShotBufferize()
-            - insertTensorCopies(target, options)
-            - bufferizeOp() 会调用`BufferizableOpInterface::bufferize()`函数来对每个op进行具体的bufferize
+  - mlir/lib/Dialect/Bufferization/TransformOps/BufferizationTransformOps.cpp: transform::OneShotBufferizeOp::apply()函数，从transform IR提供的各个参数中获得OneShotBufferizationOptions options，之后主要调用
+    - runOneShotModuleBufferize()
+      - insertTensorCopies(moduleOp, options)
+      - bufferizeOp() 会调用`BufferizableOpInterface::bufferize()`函数来对每个op进行具体的bufferize
+    - runOneShotBufferize()
+      - insertTensorCopies(target, options)
+      - bufferizeOp() 会调用`BufferizableOpInterface::bufferize()`函数来对每个op进行具体的bufferize
 - 示例：mlir/test/Dialect/Bufferization/Transforms/transform-ops.mlir
 
 ```text
@@ -1308,7 +1308,7 @@ public:
 MLIR中的数据流图是由Operation和Value构成的：（use-def chain）
 
 - Value的值要么来自于Operation的result，要么来自于BlockArgument
-    - 调用getDefiningOp时，BlockArgument会返回null
+  - 调用getDefiningOp时，BlockArgument会返回null
 
 - 每个Operation的Operand都是到Value的指针
 
@@ -1373,23 +1373,23 @@ mlir/include/mlir/IR/BuiltinTypes.h
 类型：
 
 - FloatType
-    - getF32
-    - getWidth
+  - getF32
+  - getWidth
 - IndexType ：target word-size integer
 - IntegerType
 
 用法
 
 - 判断类型
-    - isInteger
-        - isInteger(unsigned width)
-    - isIndex
-    - isIntOrIndex
-    - isIntOrFloat
+  - isInteger
+    - isInteger(unsigned width)
+  - isIndex
+  - isIntOrIndex
+  - isIntOrFloat
 - 生成 get
-    -  RankedTensorType::get(ArrafRef<int64_t> shapes, elemType)
+  -  RankedTensorType::get(ArrafRef<int64_t> shapes, elemType)
       例如 RankedTenorType newType = RankedTensorType::get({srcDims[0], 1}), srcType.getElementType)
-    - IntegerType::get(op→getContext(), 64);
+  - IntegerType::get(op→getContext(), 64);
 
 ---
 
@@ -2742,7 +2742,7 @@ if (extractionOp && insertionOp) {
 子interface
 
 - SubsetExtractionOpInterface
-    - `OpOperand getSourceOperand()`
+  - `OpOperand getSourceOperand()`
 
 - SubsetInsertionOpInterface
   - `OpOperand getSourceOperand()`
@@ -3175,8 +3175,8 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
 
 - 生成一个连续的序列，包含起始值，不包含结束值。 `seq_inclusive` 既包含起始值，也包含结束值。
 - 用法
-    - 循环的范围 `for (auto idx : llvm::seq<int>(0, rank))`
-    - 创建个连续的`SmallVector<int64_t> res{llvm::to_vector(llvm::seq((int64_t)0, size))};`
+  - 循环的范围 `for (auto idx : llvm::seq<int>(0, rank))`
+  - 创建个连续的`SmallVector<int64_t> res{llvm::to_vector(llvm::seq((int64_t)0, size))};`
 - 源码
 
   ```cpp
@@ -3455,7 +3455,7 @@ auto val = getValueOrCreateConstantIndexOp(...)
 if (mathPattern(val, m_Zero())) // 判断 val 是否是立即数0 或 constant(0)
 ```
 
-  - `matchPattern(val, m_Zero())`
+- `matchPattern(val, m_Zero())`
 - matchPattern(Operation *, Pattern)
 - matchPattern(Attribute, Pattern)
 
@@ -3633,8 +3633,8 @@ mlir/lib/IR/Operation.cpp
 - getResults() / getResult(unsigned idx)
 
 - 转换为目标op
-    - cast<AddOp>(op)
-    - dyn_cast<AddOp>(op)
+  - cast<AddOp>(op)
+  - dyn_cast<AddOp>(op)
 
 - getUses() / getUsers()
 
@@ -4344,7 +4344,7 @@ mlir/lib/Analysis/DataFlow/DeadCodeAnalysis.cpp
 - lookup()
 - getOp() ： 获得该symbolTable对应的Operation
 - SymbolTable::SymbolUse
-    - getUser() 返回该symbol ref的user operation
+  - getUser() 返回该symbol ref的user operation
 
 ## SymbolUse
 
@@ -5057,10 +5057,10 @@ src -> type (Value::getType())
 
 - dyn_cast<MemRefType>() / dyn_cast<RankedTensorType>
 - ShapedType
-    - getElementTypeBitWidth
-    - getRank
-    - getShape: 当该type为ranked返回 ArrayRef<int64_t> ，否则assert
-    - isDynamicDim / getNumDynamicDims / getDynamicDimIndex
+  - getElementTypeBitWidth
+  - getRank
+  - getShape: 当该type为ranked返回 ArrayRef<int64_t> ，否则assert
+  - isDynamicDim / getNumDynamicDims / getDynamicDimIndex
 
 - mlir/include/mlir/IR/TypeUtilities.h 中的一些函数
   - verifyCompatibleShape(Type lhs, Type rhs) : 比较两个Type的shape是否一致，不关心elemType
@@ -5097,8 +5097,8 @@ if (auto intAttr = range.size.dyn_cast<Attribute>()) {
 
 - getDefiningOp： BlockArgument 返回 null
 - getOwner()
-    - OpResult ：返回拥有这个result的Operation
-    - BlockArgument ：返回拥有这个blockarg的Block
+  - OpResult ：返回拥有这个result的Operation
+  - BlockArgument ：返回拥有这个blockarg的Block
 
 ```cpp
  	// Try to get a memory effect interface for the parent operation.
