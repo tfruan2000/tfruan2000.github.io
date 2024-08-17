@@ -76,6 +76,16 @@ struct默认是public，class默认是private
 
 11.菱形继承问题：virtual public
 
+12.const constexpr
+
+constexpr: 在编译时一定已知
+
+const: 只强调不能被改变，可能在运行时才可知
+
+但是 const 变量可以直接找到其地址，修改地址里面的值。
+
+const 成员函数中可以用 mutable 改变成员变量，但不要直接把const取消，因为const函数可以修改一些和类状态无关的成员变量。
+
 # arch
 
 barrier是核间的，sync是核内的
@@ -111,7 +121,7 @@ thread block cluster
 
 thread block cluster是更大粒度的线程组，其中的线程组可以访问分布在不同block的smem，这些smem称为 distributed smem
 
-smem其实就是SM的L1Cache，这是SM私有（L2 Cache是共用的）。但若thread block cluster的block在多个SM上运行，就需要特殊的结构实现SM的smem共享。
+smem和SM的L1Cache共用一块物理空间，但Cache是不可见的，而smem是程序员可见的，这是SM私有（L2 Cache是共用的）。但若thread block cluster的block在多个SM上运行，就需要特殊的结构实现SM的smem共享。
 
 Hopper在L1和L2之间加了SM-2-SM Network，实现SM1可以访问SM2的L1 Cache
 

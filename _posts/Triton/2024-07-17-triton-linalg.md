@@ -18,11 +18,13 @@ tags: [Triton, Linalg]
 - [x] dialect
   - [x] Auxiliar
   - [x] LinalgExt
-- [ ] Analysis
-- [ ] Conversion
-- [ ] Pipeline
+- [x] Analysis
+- [x] Conversion
+- [x] Pipeline
 
-关于 Triton-Linalg 项目技术细节 主要还是在后三节 `Analysis` , `Conversion` 以及 `Pipeline`，但目前还没整理好（还没时间看qwq），闲暇时再继续总结下。本人知识深度有限，还望大家指正~
+本文已经更新完成，但是受限于篇幅和个人学识，还请大家带着理性眼光看待，有需要请阅读源码～
+
+本人知识深度有限，还望大家指正~
 
 # what's this
 
@@ -358,7 +360,7 @@ module {
     // %arg6: stride_am, splat 成同shape tensor，然后乘
     %27 = tt.splat %arg6 : i32 -> tensor<128x1xi32>
     %28 = arith.muli %26, %27 : tensor<128x1xi32>
-    // %29 = offs_k = tl.arange(0, BLOCK_SIZE_K)
+    // %21 = offs_k = tl.arange(0, BLOCK_SIZE_K)
     %29 = tt.expand_dims %21 {axis = 0 : i32} : tensor<64xi32> -> tensor<1x64xi32>
     // 这里是 stride_ak = 1
     %30 = tt.broadcast %28 : tensor<128x1xi32> -> tensor<128x64xi32>
@@ -1464,15 +1466,323 @@ assert op是用来 debug 的，`linalg_ext.assert` 输入为一个 `condition te
 
 # Analysis
 
+`Analysis` 起到了指导 pass 优化、ir 下降等作用。`Triton-Linalg` 仓库中的 `Analysis` 文件大抵是指 `AxisInfoAnalysis`。
+
+但本文想把 ptr 分析中使用的 Analysis 放在该节。主要有 `AxisInfo` 、 `mask` 、 `PointerInfo` 三部分。
+
+## ptr
+
+在 load / store / atomic 算子的下降过程中，会用到 ptr，需要对指针进行分析以获得真实的目标 memref。最终表现为 `llvm.int_to_ptr` + `aux.view`，而 地址偏移 和 mask 等信息表现为后序ir实际读写的memref大小。
+
+`PtrInfo` 类包含了以下信息。
+
+> `PtrInfo` 类主要在 load / store / atomic 的下降中使用，可以先看下文中的 `Conversion` 节，再返回来看此处。
+{: .prompt-info }
+
+```cpp
+struct PtrInfo {
+  Value memref;
+  SmallVector<OpFoldResult> offsets;
+  SmallVector<OpFoldResult> sizes;
+  SmallVector<DimInfo> dimInfos;
+  SmallVector<int64_t> permutations;
+  bool isMaskTrackerFailed = false;
+};
+```
+
+这里的 `DimInfo` 描述了最内维(最低维)的行为。有三种模式，contiguous、 broadcast以及other。
+
+- contiguous 表示最低维的数据是连续的，例如`1234..k1234..k1234..k1234..k`，那么这里 contigSize 就是 k
+
+> 这对应着 `tl.max_contiguous`
+> max_contiguous(input, values)：对于每个维度i，标识input[i]中 每values[i]个相邻元素 是连续的
+> 例如 values = [4], 则 input 可以是 [0, 1, 2, 3, 8, 9, 10, 11]
+{: .prompt-info }
+
+- broadcast 表示最低维的数据是broadcast的行为的，例如`1111222233334444...kkkk`，这里的 broadcastSize 就是 4
+
+> 这对应着 `tl.max_constany`
+> max_constany(input, values)：对于每个维度i，标识input[i]中 每values[i]个相邻元素 是常数
+> 例如 values = [4], 则 input 可以是 [0, 0, 0, 0, 1, 1, 1, 1]
+{: .prompt-info }
+
+使用 `tl.max_contiguous & tl.multiple_of` 是为了标识加载时数据的连续性，这样编译器就不会离散得处理这些数据，而是连续得去处理。
+
+```python
+offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+->
+offs_am = tl.max_contiguous(tl.multiple_of((pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M, BLOCK_SIZE_M), BLOCK_SIZE_M)
+```
+
+> tl.multiple_of(input, values)：对于每个维度i，标识input[i]中 所有元素都是 values[i] 的倍数
+> 例如 values = [2], 则 input 可以是 [0, 2, 4, 6, 8]
+{: .prompt-info }
+
+分析 `ptr` 信息的相关代码主要在 `TritonPtrContiguousConversionBase::getPtrInfo` 函数中，会去分别利用：
+
+- AxisInfoLattice (include/triton-linalg/Analysis/AxisInfoAnalysis.h) ： 获得数据的特征，连续性这些
+- MaskTracker (include/triton-linalg/Dialect/Triton/Utils/MaskTracker.h) ： 收集 mask 信息
+- PointerMetaInfoTracker(include/triton-linalg/Dialect/Triton/Utils/PointerMetaInfoTracker.h) ： 计算真实的地址(原始地址+偏移)
+
+以获得 `PtrInfo` 中的各类信息。最后这些信息组成了具体处理的memref的 offsets, sizes, strides，以及可能的 permutation。
+
+> 这部分内容太多了，大家感兴趣欢迎具体阅读源码。下文只是简单介绍下，传统功夫，点到为止。
+{: .prompt-info }
+
+## AxisInfo
+
+`AxisInfo` 主要使用 `AxisInfoExt` 类来记录信息。这个类是基于 `triton/include/triton/Analysis/AxisInfo.h` 修改的。所以理解这部分可以先去看看 triton 官方[AxisInfo](https://github.com/triton-lang/triton/blob/main/include/triton/Analysis/AxisInfo.h)。
+
 ```bash
 include/triton-linalh/Analysis/AxisInfoAnalysis.h
 lib/Analysis/AxisInfoAnalysis.cpp
+include/triton-linalg/Dialect/Triton/Interfaces/InferAxisInfoInterface.h
+lib/Dialect/Triton/Interfaces/InferAxisInfoInterface.cpp
 ```
 
-指针相关的分析：
+最重要的信息：
 
-1. 获得访存时目标memref的layout，以从ptr中获得正确的memref
-2. 优化op下降(例如尽可能地连续访存)
+- divisibility：维度i上，所有元素的最大二次幂公约数。在ttir中经常可以blockArg上有attr： `(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32}`。
+- stride: 维度i上，每 `stride[i]` 个相邻元素是连续的。对应 `tl.max_contiguous(input, values)` 的 `values`。
+- strideValue: 维度i上，两个相邻连续元素的差值为 `strideValue[i]`。对应着 `tl.multiple_of(input, values)` 的 `values`.
+- constantValue：该 lattice 中的 constant value
+
+以下面两种数据为例
+
+```bash
+[[10, 11, 12, 13, 18, 19, 20, 21],
+ [20, 21, 22, 23, 28, 29, 30, 31]]
+- divisibility: [1, 2]
+- stride: [4, 2]
+- strideValue: [1, 10]
+
+[[12, 16, 20, 24],
+ [13, 17, 21, 25],
+ [14, 18, 22, 26],
+ [15, 19, 23, 27]]
+- divisibility: [4, 1]
+- stride: [4, 4]
+- strideValue: [1, 4]
+```
+
+这些信息都是从挂在 op身上的 attr 收集的
+
+```cpp
+// lib/Dialect/Triton/Interfaces/InferAxisInfoInterface.cpp
+  if (Attribute attr = op->getAttr("tt.divisibility")) {
+    auto vals = attr.cast<DenseElementsAttr>().getValues<int>();
+    divisibility = AxisInfoExt::DimVectorT(vals.begin(), vals.end());
+  }
+  if (Attribute attr = op->getAttr("tt.contiguity")) {
+    auto vals = attr.cast<DenseElementsAttr>().getValues<int>();
+    stride = AxisInfoExt::DimVectorT(vals.begin(), vals.end());
+    strideValue = AxisInfoExt::DimVectorT(vals.size(), 1); // 连续，所以 strideValue 全 1
+  }
+  if (Attribute attr = op->getAttr("tt.constancy")) {
+    assert(!op->getAttr("tt.contiguity") &&
+           "Get tt.constancy and tt.contiguity attribute at the same op");
+    auto vals = attr.cast<DenseElementsAttr>().getValues<int>();
+    stride = AxisInfoExt::DimVectorT(vals.begin(), vals.end());
+    strideValue = AxisInfoExt::DimVectorT(vals.size(), 0); // 常量，所以 strideValue 全 1
+  }
+```
+
+整个算法是基于MLIR官方提供的数据流分析算法，通过定义每个算子的转移函数，进而推导出全图的连续性信息。
+
+![alt text](/assets/img/blog/img_triton_linalg/axisInfo.png)
+
+引自：[浅谈寒武纪开源的Triton-Linalg编译器前端](https://zhuanlan.zhihu.com/p/706401510)
+
+## MaskTracker
+
+```cpp
+include/triton-linalg/Dialect/Triton/Utils/MaskTracker.h
+lib/Dialect/Triton/Utils/MaskTracker.cpp
+```
+
+通过 `MaskTracker` 来分析 load 和 store 时所使用的mask的信息。
+
+```cpp
+MaskTracker maskTracker;
+if (mask) {
+  maskTracker.parse(mask, loc, rewriter);
+```
+
+在分析 mask 时，将所有情况归纳为 `Scalar, SimpleRange, Mask` 三类(Result)，以方便后序下降处理。
+
+在 parse 时，会**递归地往前遍历**，直到收集完能表达 mask 的完整信息。所有遍历到的 parseVal 可以被分成了三类情况处理：
+
+- parseVal 的 type 是 `IntegerType`，即直接是一个标量，来自于 arith 的标量计算
+- parseVal 的 defineOp 为特定 op 时
+- parseVal 没有 defineOp 时(说明已经到 blockArg 了)
+
+> 详细了解请自行阅读 `lib/Dialect/Triton/Utils/MaskTracker.cpp`，下文只以上述 ir 为例说明 mask parse 的过程。
+{: .prompt-info }
+
+由于 mask 分析时还没完成 `triton-to-linalg` 的转换，我们不妨以 `ttir` 中 `tt.load` 相关的 `mask` 计算为例。
+
+> triton-lang tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
+
+```text
+// 下面的ir实现 mask=offs_k[None, :] < K - k * BLOCK_SIZE_K
+%21 = tt.make_range {end = 64 : i32, start = 0 : i32} : tensor<64xi32> // offs_k = tl.arange(0, BLOCK_SIZE_K)
+%29 = tt.expand_dims %21 {axis = 0 : i32} : tensor<64xi32> -> tensor<1x64xi32> // offs_k[None, :]
+%66 = arith.muli %arg9, %c64_i32 : i32 // k * BLOCK_SIZE_K， %arg9 是 for 循环的 blcokArg，表示 k
+%67 = arith.subi %arg5, %66 : i32 // K - k * BLOCK_SIZE_K， %arg5 表示 K
+%68 = tt.splat %67 : i32 -> tensor<1x64xi32>
+%69 = arith.cmpi slt, %29, %68 : tensor<1x64xi32> // offs_k[None, :] < K - k * BLOCK_SIZE_K
+%70 = tt.broadcast %69 : tensor<1x64xi1> -> tensor<128x64xi1>
+// tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
+%71 = tt.load %arg11, %70, %cst : tensor<128x64x!tt.ptr<f16>>
+```
+
+由上面的 ir 中的 mask 可以得到下面的数据流
+
+```bash
+                               ┌►tt.expand_dims─►tt.make_range
+mask─►tt.broadcast─►arith.cmpi─┤
+                               └►tt.splat─►arith.subi─►arith.muli
+```
+
+(1) tt.broadcast
+
+继续 parse src (来自 arith.cmpi)
+
+(2) arith.cmpi
+
+继续 parse lhs (来自 tt.expand_dims) 和 rhs (来自 tt.splat)。
+
+- parse lhs 拿到 tt.expand_dims 返回的 `Result`(`SimpleRange`)
+- parse rhs 拿到 tt.splat 返回的 `Failure`， 停止。
+
+如果不停止，会进入 `compareSimpleRange` 将 parse lhs 的 `Result`(`SimpleRange`) 和 parse rhs 的 `Result`(`Scalar`) 给结合起来，用于计算 mask 的新上届和下届。
+
+(3) tt.expand_dims
+
+继续 parse src (来自 tt.make_range)。
+
+拿到 tt.make_range 返回的 `Result`(`SimpleRange`)，继续通过 `expandDimRange` 跟踪。
+
+```cpp
+// axis = 1
+self.dims.insert(self.dims.begin() + axis, rewriter.getIndexAttr(1)); // 此时 self.dims = [0, 1]
+self.axis += 1; // self.axis = 1
+```
+
+(4) tt.make_range
+
+返回的 `Result` 为  `SimpleRange`
+
+```cpp
+SimpleRange ret;
+ret.start = rewriter.getIndexAttr(start); // rangeOp.getStart()
+ret.end = rewriter.getIndexAttr(end); // rangeOp.getEnd()
+ret.dims.push_back(rewriter.getIndexAttr(shape[0]));
+ret.axis = 0;
+```
+
+(5) tt.splat
+
+继续 parse src(来自 arith.subi)
+
+拿到 arith.subi 返回的 `Failure`，停止。
+
+如果 parse src 返回的 `Result` 为 `Scalar`，那么将 `SplatVisitor`，主要处理逻辑如下
+
+```cpp
+for (auto s : dstShape) // dstShape = [1, 64]
+  self.dims.push_back(rewriter.getIndexAttr(s));
+```
+
+(6) arith.subi
+
+继续 parse lhs (来自 blockArg) 和 rhs (来自 arith.muli)。
+
+- parse lhs 拿到 blockArg 返回的 `Result`(`Scalar`)
+- parse rhs 拿到 arith.muli 返回的 `Failure`，结束。
+
+但如果 parse rhs 返回的不是 `Failure`，那么会进入 `BinaryVisitor`，将 parse lhs 和 parse rhs 返回的 `Result` 给使用 `lib/Utils/Utils.cpp` 中的 `subOFRs` 结合起来，组成新的 `Result`。
+
+`subOFRs` 的主要逻辑就是先尽量 fold 掉一些特殊的 sub 计算，没有 fold 成功的话就把 sub 计算的 lhsType 和 rhstype 都转为 index，再做 sub。
+
+(7) blockArg
+
+由于它的 type 是 `IntegerType`，即一个 `scalarVal`，所以进入 `parseIntScalar` 函数，直接通过 `arith.index_cast` 转为 `index` 类型。
+
+```cpp
+auto castOp = rewriter.create<arith::IndexCastOp>(
+    loc, rewriter.getIndexType(), scalar);
+Scalar ret;
+ret.scalar = castOp.getResult();
+```
+
+(8) arith.muli
+
+由于 defineOp 不属于下面列表，所以进入 `parseUnknownValue` 函数。但由于 type 并不是 `ShapeType` 所以 parse 在这里 failed。
+
+```cpp
+return llvm::TypeSwitch<Operation *, FailureOr<Result>>(defOp)
+    .Case<arith::ConstantOp, arith::AddIOp, arith::AndIOp, arith::CmpIOp,
+          arith::SubIOp, arith::ExtSIOp, arith::TruncIOp,
+          triton::MakeRangeOp, triton::BroadcastOp, triton::ExpandDimsOp,
+          triton::SplatOp, triton::TransOp>(
+        [&](auto op) { return parseOp(op); })
+    .Default([&](Operation *) { return parseUnknownValue(operand); });
+```
+
+(9) arith.constant
+
+当 constant 的值来自于单个 denseVal的 splat，即 `arith.constant dense : tensor<axbxi32>`。
+
+直接从其中抽出最根本的值(用 tensor.extract 或根据 denseVal 的特性取出来)，然后逻辑 `parseIntScalar` 相似。
+
+```cpp
+// value 是从 arith.constant 中提取出来的值
+auto op =
+    rewriter.create<arith::ConstantIndexOp>(loc, value.getSExtValue());
+Scalar ret;
+ret.scalar = op.getValue();
+```
+
+## PointerMetaInfoTracker
+
+```cpp
+include/triton-linalg/Dialect/Triton/Utils/PointerMetaInfoTracker.h
+lib/Dialect/Triton/Utils/PointerMetaInfoTracker.cpp
+```
+
+文件中定义了两类 tracker
+
+- TensorPointerMetaInfoTracker
+  - 主要记录 base, sizes, strides, offsets, order 这些信息
+  - 主要处理对象 tt.make_tensor_ptr, tt.advance
+- PointerMetaInfoTracker
+  - 主要记录 base, offset
+  - 主要处理对象  tt.addptr/tt.bitcast/tt.splat/tt.broadcast/tt.expand_dims
+
+以 `PointerMetaInfoTracker` 为例，一直 track 到类型为 `PointerType` 的blockArg。
+
+以下面的ir为例，我们跟踪一下流程：
+
+```text
+// a_ptrs = a_ptr + off[None, :]
+%range = tt.make_range {end = 64 : i32, start = 0 : i32} : tensor<64xi32>
+%expand = tt.expand_dims %range {axis = 0 : i32} : tensor<64xi32> -> tensor<1x64xi32>
+%broadcast = tt.broadcast %expand : tensor<1x64xi32> -> tensor<128x64xi32>
+// 把 a_ptr splat 成 对应 shape
+%splat = tt.splat %arg0 : !tt.ptr<f16> -> tensor<128x64x!tt.ptr<f16>>
+%addptr = tt.addptr %splat, %broadcast : tensor<128x64x!tt.ptr<f16>>, tensor<128x64xi32>
+```
+
+在 %arg0 处会第一次创建 `arith.constant 0 : i32` 作为 offset，然后一直反向传回去。会为 offset 一直创建 op。
+
+```bash
+            ┌►tt.splat────►%arg0 (a_ptr)
+            │
+tt.addptr--►│
+            │
+            └►tt.broadcast─►tt.expand_dims
+```
 
 # Conversion
 
@@ -1547,6 +1857,66 @@ arith.constant dense<0.0> : tensor<axf32>
 ->
 %mapped = linalg.map { arith.addi } ins(%lhs, %rhs : tensor<128xi32>, tensor<128xi32>) outs(%empty : tensor<128xi32>)
 ```
+
+## load / store / mask
+
+由于 tt.load 和 tt.store 的下降 pattern 比较多，切都依赖于 mask 和 ptr 分析，所以单独拿出来讲。
+
+### load / store
+
+在 `triton-linalg/lib/Conversion/TritonToLinalg/LoadStoreConversion.cpp` 中定义了多种情况下的 conversion pattern，根据 pattern benefit 取分开。高 benefit 的 pattern 下降得到的 ir 理论上有更好的 performance。
+
+- benefit = 100
+  - TritonContiguousLoadOpConversion, TritonContiguousStoreOpConversion
+  - TritonScalarLoadOpConversion, TritonScalarStoreOpConversion
+
+- benefit = 1
+  - TritonTensorPtrLoadOpConversion, TritonTensorPtrStoreOpConversion
+
+- benefit = 0
+  - TritonScatteredLoadOpConversion, TritonScatteredStoreOpConversion
+
+1.TritonContiguousLoadOpConversion, TritonContiguousStoreOpConversion
+
+首先判断是否是 `TensorPointerType`。
+
+> PointerType 的一些形式：
+>
+> - !tt.ptr<f32>
+> - !tt.ptr<tensor<2xf32>>  这就是 TensorPointerType
+> - !tt.ptr<!tt.ptr<f32>>
+> PointerType 的 getPointeeType 方法会获得 PointerType 内的类型。上面三个分别获得 f32, tensor<2xf32>, !tt.ptr<f32>
+{: .prompt-info }
+
+然后进入 `getPtrInfo` 函数从指针中获得相关信息，接下来进入指针信息分析。关于 ptr 和 mask 的分析细节请看接下来的两节。
+
+如果成功分析得到 `PtrInfo`，对于 load，则使用 `bufferization.to_tensor` + `linalg.copy` 直接将综合 mask 和 地址偏移 信息后的具体数据给copy出来；对于 store，则使用 `bufferization.materialize_in_destination` 直接将数据拷贝到对应的 memref(从ptr中得到) 上。
+
+2. TritonTensorPtrLoadOpConversion, TritonTensorPtrStoreOpConversion
+
+load 和 store 的结果为 scalar，直接使用 memref.load 和 memref.store 承接。
+
+3. TritonScatteredLoadOpConversion, TritonScatteredStoreOpConversion
+
+`getPtrInfo` 分析失败后，无法连续地 load 或 store 数据，使用 linalg_ext.gather 和 linalg_ext.scatter 分别承接 load 和 store 的下降。
+
+> linalg_ext.gather 和 linalg_ext.scatter 在上文都已经说过了，不记得可以回顾下。
+{: .prompt-info }
+
+### atomic ops
+
+由于 atomic op(tt.atomic_cas 和 tt.atomic_rmw) 也对 ptr 进行操作了，所以也有多种下降pattern，尽量分析出连续的情况。
+
+`LinalgExt` 中也定义了对应的 op 来承接下降。例如承接 `tt.atomic_rmw` 的下降，如果分析出 `ptr` 的访问行为是连续的就用 `linalg_ext.atomic_rmw`，反之则用 `linalg_ext.gather_atomic_rmw`。
+
+具体的pattern请自行阅读：
+
+```cpp
+lib/Conversion/TritonToLinalg/AtomicRmwConversion.cpp
+lib/Conversion/TritonToLinalg/AtomicCASConversion.cpp
+```
+
+> `AtomicRMW` 是一种原子读-修改-写（Read-Modify-Write）操作，用于在多线程或并行计算环境中对共享内存进行原子操作。这种操作确保了在对某个内存位置进行读取、修改和写入的过程中，不会被其他线程或进程打断，从而避免数据竞争和不一致性。
 
 ## tt.ops
 
@@ -1837,91 +2207,6 @@ tt.precise_sqrt / tt.precise_divf 直接下降到 math.sqrt / math.divf， `tt.m
 
 `tt.histogram` 是表直方图的算子，当前下降用的是比较 naive 的实现，后续应该会增加 `linalg_ext` 的op来承接。
 
-## load / store
-
-由于 tt.load 和 tt.store 的下降 pattern 比较多，所以单独拿出来讲。
-
-在 `triton-linalg/lib/Conversion/TritonToLinalg/LoadStoreConversion.cpp` 中定义了多种情况下的 conversion pattern，根据 pattern benefit 取分开。高 benefit 的 pattern 下降得到的 ir 理论上有更好的 performance。
-
-- benefit = 100
-  - TritonContiguousLoadOpConversion, TritonContiguousStoreOpConversion
-  - TritonScalarLoadOpConversion, TritonScalarStoreOpConversion
-
-- benefit = 1
-  - TritonTensorPtrLoadOpConversion, TritonTensorPtrStoreOpConversion
-
-- benefit = 0
-  - TritonScatteredLoadOpConversion, TritonScatteredStoreOpConversion
-
-1.TritonContiguousLoadOpConversion, TritonContiguousStoreOpConversion
-
-首先判断是否是 `TensorPointerType`。
-
-> PointerType 的一些形式：
->
-> - !tt.ptr<f32>
-> - !tt.ptr<<2xf32>>  这就是 TensorPointerType
-> - !tt.ptr<!tt.ptr<f32>>
-> PointerType 的 getPointeeType 方法会获得 PointerType 内的类型。上面三个分别获得 f32, <2xf32>, !tt.ptr<f32>
-{: .prompt-info }
-
-然后进入 `getPtrInfo` 函数从指针中获得相关信息，接下来进入指针信息分析。
-
-### ptr
-
-`PtrInfo` 类主要记录了 offsets, sizes,
-
-```cpp
-struct PtrInfo {
-  Value memref;
-  SmallVector<OpFoldResult> offsets;
-  SmallVector<OpFoldResult> sizes;
-  SmallVector<DimInfo> dimInfos;
-  SmallVector<int64_t> permutations;
-  bool isMaskTrackerFailed = false;
-};
-```
-
-这里的 `DimInfo` 描述了最内维(最低维)的行为。有三种模式，contiguous 、 broadcast以及other。
-
-- contiguous 表示最低维的数据是连续的，例如`1234..k1234..k1234..k1234..k`，那么这里 contigSize 就是 k
-
-> 这对应着 `tl.max_contiguous`
-> max_contiguous(input, values)：对于每个维度i，标识input[i]中 每values[i]个相邻元素 是连续的
-> 例如 values = [4], 则 input 可以是 [0, 1, 2, 3, 8, 9, 10, 11]
-{: .prompt-info }
-
-- broadcast 表示最低维的数据是broadcast的行为的，例如`1111222233334444...kkkk`，这里的 broadcastSize 就是 4
-
-> 这对应着 `tl.max_constany`
-> max_constany(input, values)：对于每个维度i，标识input[i]中 每values[i]个相邻元素 是常数
-> 例如 values = [4], 则 input 可以是 [0, 0, 0, 0, 1, 1, 1, 1]
-{: .prompt-info }
-
-使用 `tl.max_contiguous & tl.multiple_of` 是为了标识加载时数据的连续性，这样编译器就不会离散得处理这些数据，而是连续得去处理。
-
-```python
-offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
-->
-offs_am = tl.max_contiguous(tl.multiple_of((pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M, BLOCK_SIZE_M), BLOCK_SIZE_M)
-```
-
-> multiple_of(input, values)：对于每个维度i，标识input[i]中 所有元素都是 values[i] 的倍数
-> 例如 values = [2], 则 input 可以是 [0, 2, 4, 6, 8]
-{: .prompt-info }
-
-### mask
-
-通过 `MaskTracker` 来分析 load 和 store 时所使用的mask的信息。
-
-```cpp
-MaskTracker maskTracker;
-if (mask) {
-  maskTracker.parse(mask, loc, rewriter);
-```
-
-> 当 `arith.cmpi` 和 `arith.select` 是用来做计算 mask 时，可以将 `arith.cmpi` 转为 `maxsi + minsi + fill(%true) + pad` 的格式，将 `arith.select` 转为 `tensor.extract_slice + pad` 的格式，直接获取信息。
-
 ## summary
 
 依然以上文 `tutorials/03-matrix-multiplication.py` 的例子作总结：
@@ -1943,31 +2228,37 @@ op-to-op conversion summary:
 
 尽量在 `arith`, `math`, `linalg`, `tensor` 中找到能承接 `tt.ops` 到op，`arith.ops`, `math.ops` 只处理标量，如果是op操作tensor，那下降到 `linalg.map{arith.ops/math.ops}`。且所有 `!tt.ptr` 都被 `TypeConverter` 给转为 `i64` 了。
 
-| ttir                                           | linalg-on-tensor                                              |
-|------------------------------------------------|---------------------------------------------------------------|
-| arith.ops 标量计算                             | arith.ops 标量计算                                            |
-| arith.ops / math.ops tensor计算                | linalg.map{arith.ops}  / linalg.map{math.ops}                 |
-| tt.get_program_id x : i32                      | tt.get_program_id x : i32                                     |
-| tt.func / tt.return / tt.call                  | func.func, func.return, func.call                             |
-| tt.broadcast                                   | tensor.collapse_shape + linalg.broadcast                      |
-| tt.splat                                       | linalg.fill                                                   |
-| tt.expand_dims                                 | tensor.expand_shape                                           |
-| tt.addptr                                      | linalg.map{addi}                                              |
-| tt.make_range                                  | linalg_ext.make_range                                         |
-| tt.dot                                         | linalg.matmul                                                 |
-| tt.bitcast                                     | linalg.map{bitcast}                                           |
-| tt.extern_elementwise                          | linalg_ext.libdevice_call / linalg_ext.scalar_libdevice_call  |
-| tt.int_to_ptr / tt.ptr_to_int                  | 直接使用第一个 operand 替换使用                               |
-| tt.trans                                       | linalg.transpose                                              |
-| tt.print                                       | aux.print / aux.scalar.print                                  |
-| tt.assert                                      | linalg_ext.assert                                             |
-| tt.reduce                                      | linalg.reduce                                                 |
-| tt.scan                                        | linalg_ext.scan                                               |
-| tt.cat                                         | tensor.insert_slice                                           |
-| tt.join / tt.split                             | tensor.insert_slice + tensor.insert_slice                     |
-| tt.clampf                                      | arith.maximumf(arith.maxnumf) + arith.minimumf(arith.minnumf) |
-| tt.precise_sqrt / tt.precise_divf / tt.mulhiui | math.sqrt / math.divf / math_ext.mulhiui                      |
-| tt.histogram                                   | 比较 naive 的拼接实现，后续会改为 linalg_ext.histogram             |
+`linalg_ext.atomic_rmw`，反之则用 `linalg_ext.gather_atomic_rmw`。
+
+| ttir                                           | linalg-on-tensor                                                                                              |
+|------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| arith.ops 标量计算                             | arith.ops 标量计算                                                                                            |
+| arith.ops / math.ops tensor计算                | linalg.map{arith.ops}  / linalg.map{math.ops}                                                                 |
+| tt.load                                        | linalg.copy(连续) / memref.load(load一个数) / linalg_ext.gather(未分析出连续)                                 |
+| tt.store                                       | bufferization.materialize_to_destination(连续) / memref.store(store一个数) / linalg_ext.scatter(未分析出连续) |
+| tt.atomic_rmw                                  | linalg_ext.atomic_rmw(连续) / linalg_ext.gather_atomic_rmw(未分析出连续)                                      |
+| tt.atomic_cas                                  | linalg_ext.atomic_cas(连续) / linalg_ext.gather_atomic_cas(未分析出连续)                                      |
+| tt.get_program_id x : i32                      | tt.get_program_id x : i32                                                                                     |
+| tt.func / tt.return / tt.call                  | func.func, func.return, func.call                                                                             |
+| tt.broadcast                                   | tensor.collapse_shape + linalg.broadcast                                                                      |
+| tt.splat                                       | linalg.fill                                                                                                   |
+| tt.expand_dims                                 | tensor.expand_shape                                                                                           |
+| tt.addptr                                      | linalg.map{addi}                                                                                              |
+| tt.make_range                                  | linalg_ext.make_range                                                                                         |
+| tt.dot                                         | linalg.matmul                                                                                                 |
+| tt.bitcast                                     | linalg.map{bitcast}                                                                                           |
+| tt.extern_elementwise                          | linalg_ext.libdevice_call / linalg_ext.scalar_libdevice_call                                                  |
+| tt.int_to_ptr / tt.ptr_to_int                  | 直接使用第一个 operand 替换使用                                                                               |
+| tt.trans                                       | linalg.transpose                                                                                              |
+| tt.print                                       | aux.print / aux.scalar.print                                                                                  |
+| tt.assert                                      | linalg_ext.assert                                                                                             |
+| tt.reduce                                      | linalg.reduce                                                                                                 |
+| tt.scan                                        | linalg_ext.scan                                                                                               |
+| tt.cat                                         | tensor.insert_slice                                                                                           |
+| tt.join / tt.split                             | tensor.insert_slice + tensor.insert_slice                                                                     |
+| tt.clampf                                      | arith.maximumf(arith.maxnumf) + arith.minimumf(arith.minnumf)                                                 |
+| tt.precise_sqrt / tt.precise_divf / tt.mulhiui | math.sqrt / math.divf / math_ext.mulhiui                                                                      |
+| tt.histogram                                   | 比较 naive 的拼接实现，后续会改为 linalg_ext.histogram                                                         |
 
 代码中构造 `tensor.empty` 作为输出时，很多都是使用
 
@@ -1986,7 +2277,22 @@ rewriter.create<tensor::EmptyOp>(loc, initDims, resultTy.getElementType());
 
 # Pipeline
 
-一些优化transform pass
+pipeline 的定义在下面的文件，从中可以看到很多 pass 都是下降过程中的 conversion pass。
+
+```cpp
+lib/Pipelines/Pipelines.cpp
+```
+
+此外，还有一些非 mlir 官方的 pass 值得关注：
+
+- WrapFuncBodyWithSingleBlockPass: 当 funcOp 中有多个 block(一般含有 BranchOpInterface 的op时会有多个 block)，创建一个 scf.execute_region 将所有 block 包起来，方便后序的分析。
+- CanonicalizeTritonPass: 为了方便后序 conversion，将 op canoncialize 成等效的形式。
+- PointerStrengthReductionPass: 支持跨block(BranchOpInterface和RegionBranchOpInterface)的ptr分析。
+- ExtractLikeMoveBackwardPass: 调整extractOp的位置。
+- ArithCanonicalizerPass: 将一些 arith op 转为等效的计算形式；规范化存在nan时的计算图。
+
+> 这些pass的测试都在 `test/Dialect/Triton/` 下
+{: .prompt-info }
 
 # 结语
 

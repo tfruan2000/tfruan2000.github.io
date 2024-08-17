@@ -209,9 +209,13 @@ enum class [[nodiscard]] ChangeResult {
 
 2.ProgramPoint
 
-ProgramPoint 是一个 `PointerUnion`，可以是 `Operation *, Value, Block *`
+MLIR 中的 ProgramPoint 是一个 `PointerUnion`，可以是 `Operation *, Value, Block *`
 
 ProgramPoint 是 DataFlowAnalysis 中的基石，每次分析都是从一个 point 对象出发，visit 到更多的 point 对象。
+
+数据流分析理论中，每个 program state 前后都有一个 program point 点，如下图，图源[南大软件分析课程](https://www.bilibili.com/video/BV1oE411K79d/?vd_source=29858f685ca867d754c4c0b13af98cb4)。
+
+![program point](/assets/img/blog/img_mlir_note/data_flow_analysis1.png)
 
 3.DataFlowSolver
 
@@ -221,6 +225,8 @@ ProgramPoint 是 DataFlowAnalysis 中的基石，每次分析都是从一个 poi
 
 > 在数据流分析中，用来描述数据数据流中信息的变化和融合的是 SemiLattice 理论。例如，在进行活跃性分析时，使用交半格可以跟踪不同数据流中变量活跃性的最小公共集合。这部分的内容可以参考南大《软件分析》课程的[数据流分析](https://www.bilibili.com/video/BV1oE411K79d/?vd_source=29858f685ca867d754c4c0b13af98cb4)。
 > 所谓 fixedpoint iteration 算法其实是利用了 SemiLattice 的特性，保证迭代过程中一定存在一个上界，即 fixpoint。
+> fixedpoint 即 所有 program point 都关联一个值(data flow value)，这个值表示 program state 在那个点所有可能值的抽象。
+> 强烈推荐 南大[软件分析](https://zhuanlan.zhihu.com/p/110050716) 课程，帮助大家了解相关的概念。
 {: .prompt-info }
 
 数据流分析的流程：
@@ -3009,10 +3015,10 @@ bool all_of(R &&Range, UnaryPredicate P) {
 用法
 
 ```cpp
-	if (llvm::any_of(op->getRegions(), [](Region &r) {
-			return r.getBlocks().size > 1;
-		}))
-	return failure();
+if (llvm::any_of(op->getRegions(), [](Region &r) {
+		return r.getBlocks().size > 1;
+	}))
+return failure();
 ```
 
 实现
@@ -3066,6 +3072,14 @@ for (const auto &[operand, arg] :
   if (operand != arg)
     return failure();
 }
+```
+
+7.llvm::is_contained
+
+判断 Element 是否在 Range 中，比用 `llvm::find` 更简洁。
+
+```cpp
+bool is_contained(R &&Range, const E &Element)
 ```
 
 ## function
