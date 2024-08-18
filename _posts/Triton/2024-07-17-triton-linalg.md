@@ -76,11 +76,15 @@ tags: [Triton, Linalg]
 > 感兴趣的同学可以了解下 [torch.compile](https://pytorch.org/docs/stable/torch.compiler.html)
 
 - 扩展性： linalg - to - HW special dialect
+
 （借用一下大佬的图，来源见水印）
 ![triton_ext_pipeline](/assets/img/blog/img_triton_linalg/mlir_pipeline.png)
 
 - 中间层级优化：trion目前GPU的下降路线过于生硬，可以说是直接一把 `conversion`，一把下降会导致难以优化中间 IR（例如离散性优化），这对 `SIMT` 虽然影响不大（每个wrap内的thread执行的指令相同，可能进行Memory-Coalescing，提升访存效率），但是离散地访存行为对 `SIMD` 的影响无疑是巨大的。
+
 以说是直接一把 `conversion`，一把下降会导致难以优化中间 IR（例如离散性优化），这对 `SIMT` 虽然影响不大，但是离散地访存行为对 `SIMD` 的影响无疑巨大
+
+> GPU 中当一个 warp 内多个 thread 访问的地址连续，那么这些访问就可以 coalesce，从而降低全局内存的访问开销。
 
 ## triton-shared
 
@@ -1533,6 +1537,8 @@ offs_am = tl.max_contiguous(tl.multiple_of((pid_m * BLOCK_SIZE_M + tl.arange(0, 
 
 `AxisInfo` 主要使用 `AxisInfoExt` 类来记录信息。这个类是基于 `triton/include/triton/Analysis/AxisInfo.h` 修改的。所以理解这部分可以先去看看 triton 官方[AxisInfo](https://github.com/triton-lang/triton/blob/main/include/triton/Analysis/AxisInfo.h)。
 
+也可以看一下这篇博客 [OpenAI Triton: Dive into Axis and Coalesce](https://zhuanlan.zhihu.com/p/687394750)。
+
 ```bash
 include/triton-linalh/Analysis/AxisInfoAnalysis.h
 lib/Analysis/AxisInfoAnalysis.cpp
@@ -1542,7 +1548,7 @@ lib/Dialect/Triton/Interfaces/InferAxisInfoInterface.cpp
 
 最重要的信息：
 
-- divisibility：维度i上，所有元素的最大二次幂公约数。在ttir中经常可以blockArg上有attr： `(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32}`。
+- divisibility：维度i上，所有元素的最大二次幂公约数。在ttir中经常可以blockArg上有attr： `(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32}`。divisibility这个参数用来计算alignment。
 - stride: 维度i上，每 `stride[i]` 个相邻元素是连续的。对应 `tl.max_contiguous(input, values)` 的 `values`。
 - strideValue: 维度i上，两个相邻连续元素的差值为 `strideValue[i]`。对应着 `tl.multiple_of(input, values)` 的 `values`.
 - constantValue：该 lattice 中的 constant value
@@ -1565,29 +1571,31 @@ lib/Dialect/Triton/Interfaces/InferAxisInfoInterface.cpp
 - strideValue: [1, 4]
 ```
 
-这些信息都是从挂在 op身上的 attr 收集的
+这些信息最初都是从挂在 op身上的 attr 收集的。然后需要根据数据流传递。
 
 ```cpp
 // lib/Dialect/Triton/Interfaces/InferAxisInfoInterface.cpp
-  if (Attribute attr = op->getAttr("tt.divisibility")) {
-    auto vals = attr.cast<DenseElementsAttr>().getValues<int>();
-    divisibility = AxisInfoExt::DimVectorT(vals.begin(), vals.end());
-  }
-  if (Attribute attr = op->getAttr("tt.contiguity")) {
-    auto vals = attr.cast<DenseElementsAttr>().getValues<int>();
-    stride = AxisInfoExt::DimVectorT(vals.begin(), vals.end());
-    strideValue = AxisInfoExt::DimVectorT(vals.size(), 1); // 连续，所以 strideValue 全 1
-  }
-  if (Attribute attr = op->getAttr("tt.constancy")) {
-    assert(!op->getAttr("tt.contiguity") &&
-           "Get tt.constancy and tt.contiguity attribute at the same op");
-    auto vals = attr.cast<DenseElementsAttr>().getValues<int>();
-    stride = AxisInfoExt::DimVectorT(vals.begin(), vals.end());
-    strideValue = AxisInfoExt::DimVectorT(vals.size(), 0); // 常量，所以 strideValue 全 1
-  }
+if (Attribute attr = op->getAttr("tt.divisibility")) {
+  auto vals = attr.cast<DenseElementsAttr>().getValues<int>();
+  divisibility = AxisInfoExt::DimVectorT(vals.begin(), vals.end());
+}
+if (Attribute attr = op->getAttr("tt.contiguity")) {
+  auto vals = attr.cast<DenseElementsAttr>().getValues<int>();
+  stride = AxisInfoExt::DimVectorT(vals.begin(), vals.end());
+  strideValue = AxisInfoExt::DimVectorT(vals.size(), 1); // 连续，所以 strideValue 全 1
+}
+if (Attribute attr = op->getAttr("tt.constancy")) {
+  assert(!op->getAttr("tt.contiguity") &&
+         "Get tt.constancy and tt.contiguity attribute at the same op");
+  auto vals = attr.cast<DenseElementsAttr>().getValues<int>();
+  stride = AxisInfoExt::DimVectorT(vals.begin(), vals.end());
+  strideValue = AxisInfoExt::DimVectorT(vals.size(), 0); // 常量，所以 strideValue 全 1
+}
 ```
 
-整个算法是基于MLIR官方提供的数据流分析算法，通过定义每个算子的转移函数，进而推导出全图的连续性信息。
+传递时，例如传递的时候某个op的producder的contiguity分别等于[64, 1]和[64, 64]，那么合并后也是[64,1]
+
+整个传递算法是基于MLIR官方提供的数据流分析算法，通过定义每个算子的转移函数，进而推导出全图的连续性信息。
 
 ![alt text](/assets/img/blog/img_triton_linalg/axisInfo.png)
 

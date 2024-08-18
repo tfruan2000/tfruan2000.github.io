@@ -39,3 +39,5 @@ package-lock.json
 _site/
 # Ignore the directory for local files during development
 _local/
+# Ignore the file for test
+/*.txt

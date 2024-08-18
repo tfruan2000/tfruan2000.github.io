@@ -289,6 +289,99 @@ vector<int> decorateRecord(TreeNode* root) {
 }
 ```
 
+# 分治
+
+将问题分为多个子问题，一段段解决再合并起来，最重要的是边界部分的处理。
+
+1. LCR 152. 验证二叉搜索树的后序遍历序列
+
+请实现一个函数来判断整数数组 postorder 是否为二叉搜索树的后序遍历结果。
+
+树的后序遍历：左-右-根 -> 每个子问题为：验证左右子树是否满足对应条件。
+
+```cpp
+bool trave(vector<int> &postorder, int root, inst start) {
+  // 此时遍历的只有root节点 || 此时遍历的只有root节点和另一个节点
+  if (root == start || root - start == 1) return true;
+  int left = start, right = root - 1;
+  int rootVal = postorder[root];
+  while (left < root && postorder[left] < rootVal) ++left;
+  while (right >= start && postorder[right] > rootVal) --right;
+  // 当以root为根后，剩下的部分已不存在左子/右子
+  if ((left == start && right == start - 1) || (left == root && right == root - 1))
+    return trave(postorder, root - 1, start);
+  if (l == r + 1)
+    return trave(postorder, l - 1, start) && trave(postorder, root - 1, r + 1);
+  return false;
+}
+
+bool verifyTreeOrder(vector<int>& postorder) {
+    int size = postorder.size();
+    if (size == 0 || size == 1) return true;
+    return trave(postorder, size - 1, 0);
+}
+```
+
+2. LCR 164. 破解闯关密码
+
+归并排序的思想，需要熟记归并排序的模版，根据问题设计比较函数 `cmp` 即可
+
+```cpp
+// 从大到小排序
+bool cmp(int lhs, int rhs) {
+  return lhs > rhs;
+}
+
+void merge(std::vector<int> &vec, int left, int mid, int right) {
+  std::vector<int> tmp(right - left + 1);
+  int i = left, j = mid + 1, k = 0;
+  while (i <= mid && j <= right) {
+    if (cmp(vec[i], vec[j])) {
+      tmp[k++] = vec[i++];
+    } else {
+      tmp[k++] = vec[j++];
+    }
+  }
+  while (i <= mid) {
+    tmp[k++] = vec[i++];
+  }
+  while (j <= right) {
+    tmp[k++] = vec[j++];
+  }
+  for (i = 0; i < k; ++i) {
+    vec[left + i] = tmp[i];
+  }
+}
+
+void merge_sort(std::vector<int> &vec, int left, int right) {
+  if (left < right) {
+    int mid = left + (right - left) / 2;
+    merge_sort(vec, left, mid);
+    merge_sort(vec, mid + 1, right);
+    merge(vec, left, mid, right);
+  }
+}
+```
+
+再回到这道题，题目要求：
+
+一个拥有密码所有元素的非负整数数组 password，密码是 password 中所有元素拼接后得到的最小的一个数，请编写一个程序返回这个密码。
+
+- 输入: password = [0, 3, 30, 34, 5, 9]
+- 输出: "03033459"
+
+需要主要，比较函数的设置， 24 应该放在 2438 前，但是应该放在 2401 后面。这时候不妨转为 string，然后拼接比较。
+
+> "242438" < "243824", "242401" > "240124"
+
+这时候只需要重新设计比较函数如下，其他保持 memge_sort
+
+```cpp
+bool cmp(int lhs, int rhs) {
+  return std::to_string(lhs) + std::to_string(rhs) < std::to_string(rhs) + std::to_string(lhs);
+}
+```
+
 # 树
 
 ## 层序遍历

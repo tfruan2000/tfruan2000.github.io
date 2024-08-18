@@ -24,10 +24,22 @@ gpu层次结构图如下
 
 ![gpu_arch](/assets/img/blog/img_triton_survey/gpu_arch.png)
 
+一个 kernel 有一个 grid，，每个 grid 最多可以配置 65535 个 thread block，每个 thread block 最多可以配置 512 个 thread。每个 thread block 由一个 SM 负责运算。 一个 thread block 内部的所有 thread 都有独自的 local mem 来存储数据，并且 thread 之间可以通过 SM 中的 smem 共享数据。thread block 内部的 thread 会以 warp 为单位运行，目前一个 warp 的配置一般就是 32 thread。
+
+每个 SM 都有独立的 smem, constant cache, register mem，SM之间共享 L2 Cache 和 gdram。 SM(流式多处理器) 中的处理单位称为 SP(流示处理器)。
+
+> 在 CUDA 编程中(逻辑视角)，SM 内的 L1 Cache 和 smem 一般被视为同一内存区域。
+> - 一是 Cache 对程序员是不可见的，一致看待保证了高速内存的利用率
+> - 二是数据从 L2 Cache 取到 L1 Cache 后，也不需要额外的 L1 Cache 到 smem 映射关系。
+>
+> Hopper 架构中引入了 SM-to-SM 的高速网络，实现了 SM 之间的 smem 互相访问。这为 Thread Block Cluster 提供了编程支持。
+> Thread Block Cluster 的提出是因为以 thread block 为粒度执行任务阻碍运行效率。需要提供更大粒度的线程组。所以一个 thread block cluster 中包含多个 thread block，其中所有 thread 都可以访问负责该 thread block cluster 计算的 SM 群的 smem，这些 smem 一起称为 distributed smem。
+
 CTA（Cooperative Thread Array）：CTA是一个线程组，由一组线程组成，这些线程可以在GPU上的多个处理器中并行执行。**CTA中的线程可以协同工作，通过共享内存等方式进行通信和协作**。CTA通常是在CUDA编程模型中使用的概念，它是将工作任务划分为较小的线程块以便并行执行的基本单元。
 
-**一个CTA通常由多个warp组成**。一个CTA的线程数量可以是32的倍数（例如，CTA可以有32、64、96等线程）。
-CTA内的线程被划分为一组一组的warp，每个warp中的线程同时执行相同的指令。
+> 其实 CTA 就是 thread block
+
+**一个CTA通常由多个warp组成**。一个CTA的线程数量可以是32的倍数（例如，CTA可以有32、64、96等线程）。CTA内的线程被划分为一组一组的warp，每个warp中的线程同时执行相同的指令。每个warp中的thread若访问的内存区域连续，那么这些访问行为可以被coalesce。
 
 CGA（Cooperative Grid Array）：CGA是一种更高级的概念，它是一组CTA的集合，可以在GPU上协同工作。CGA可以用于更大规模的并行计算，将任务划分为多个CTA进行执行，并且CTA之间可以通过全局内存进行通信和同步。
 
@@ -385,9 +397,9 @@ tritongpu ir相比ttir仅多了一个Blocked Layout，本质上描述的是Block
  #blocked = #triton_gpu.blocked<{sizePerThread = [1], threadsPerWarp = [32], warpsPerCTA = [4], order = [0]}>
 ```
 
-就是一个CTA里有4个Warp，一个Warp有32个Thread，一个Thread处理1个元素。
+就是**一个CTA里有4个Warp，一个Warp有32个Thread，一个Thread处理1个元素**。
 
-Blocked Layout只是一种Pattern，但按照这个Pattern会多次访问，总访问量达到BLOCK_SIZE
+Blocked Layout只是一种Pattern，但**按照这个Pattern会多次访问，总访问量达到BLOCK_SIZE**
 
 ## num_stages
 
@@ -424,26 +436,32 @@ class DistributedEncoding<string name> : TritonGPU_Attr<name> {
 }
 ```
 
-- **Shared Layout：**GPU中的Shared Memory是可以被一个Block内的任意线程访问的，shared layout会被用来描述哪些元素会被线程同时访问，以此来减少bank confict映射函数被定义为任意Tensor->任意Thread。
+- **Shared Layout**: GPU中的Shared Memory是可以被一个Block内的任意线程访问的，shared layout会被用来描述哪些元素会被线程同时访问，以此来减少bank confict映射函数被定义为任意Tensor->任意Thread。
 
 ### distributed layout
 
 Distributed encodings have a layout function that is entirely characterized by a d-dimensional tensor L. Note that L doesn't need to have the same shape (or even the same rank) as the tensor it is encoding.
 
+映射函数(layout function)会将特定的Tensor交给特定的Thread去处理(即一个layout描述整个tensor的访问模式)，达到一个**distribution**的效果
+
 ![distribute_layout](/assets/img/blog/img_triton_survey/distribute_layout.png)
 
 ### block layout
+
+最常见的 layout，包含了配合 AxisInfoAnalysis 分析获得 load 和 store 的访存行为，以用来访存合并。
 
 An encoding where each warp owns a contiguous portion of the target tensor. This is typically the kind of data layout **used to promote memory coalescing in LoadInst and StoreInst.**
 
 `#blocked0 = #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [8, 4], warpsPerCTA = [8, 1], order = [1, 0]}>`
 
-<img src="/assets/img/blog/img_triton_survey/cta_wrap_thread.png" alt="Untitled" style="zoom:50%;" />
+<img src="/assets/img/blog/img_triton_survey/cta_warp_thread.png" alt="Untitled" style="zoom:50%;" />
 
-- **sizePerThread = [1, 8]：每个线程处理数据Size**
-- **threadsPerWarp = [8, 4]： warp内线程的布局**
-- **warpsPerCTA = [8, 1]：CTA（Block）内warp的布局**
-- **order = [1, 0]：按行访问**
+- sizePerThread = [1, 8]：每个线程处理数据Size
+- threadsPerWarp = [8, 4]： warp内线程的布局
+- warpsPerCTA = [8, 1]：thread block内warp的布局
+- order = [1, 0]：先访问dim1，再访问dim0
+
+> Triton 会优先 `Contiguity` 更大的维度， `Contiguity`  信息一般来自于使用 `tl.max_contiguous(input, values)` 人为告知编译器，这意味着 input[i] 中每 values[i] 个相邻元素是连续的。
 
 该BLock访存模式一次能处理(1x8x8, 8x4) = (64, 32)规模的shape。但若输入op的shape为(128, 32)，那么让每个thread处理两个连续块即可，即第一个thread处理(0, 0:7), (64, 0:7)两个块
 
@@ -451,9 +469,13 @@ An encoding where each warp owns a contiguous portion of the target tensor. This
 
 In order to **avoid shared memory bank conflicts**, elements may be **swizzled** in memory.
 
-同一个warp内的thread同时访问同一列的数据
+同一个warp内的thread同时访问同一列的数据会产生 bank 冲突，对数据进行 swizzle，调整相关的存储位置，保证 thread 访问时不出现 bank conflict。
 
 ![swizzled memory](/assets/img/blog/img_triton_survey/swizzled.png)
+
+### MMA Layout 和 DotOperand Layout
+
+用来指导 op 下降到特殊指令的 attr。
 
 ## triton compiler
 
