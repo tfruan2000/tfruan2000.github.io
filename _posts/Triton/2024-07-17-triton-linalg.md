@@ -1364,6 +1364,8 @@ for (int i = 0; i < dimension_map.size(); ++i) {
 
 `AtomicRMW` 是一种原子读-修改-写（Read-Modify-Write）操作，用于在多线程或并行计算环境中对共享内存进行原子操作。这种操作确保了在对某个内存位置进行读取、修改和写入的过程中，不会被其他线程或进程打断，从而避免数据竞争和不一致性。（来自chatgpt的解释）
 
+> triton 中的 [atomic类op](https://triton-lang.org/main/python-api/triton.language.html#atomic-ops) 除了 atomic_cas，其他都下降成 tt.atomic_rmw
+
 `linalg_ext.atomic_rmw` 的inputs有一个，inits有两个(src和dst)；`linalg_ext.gather_atomic_rmw` 的inputs有多个(input, indice, mask)，inits有两个(src和dst)。承接 `tt.atomic_rmw` 的下降，如果分析出 `ptr` 的访问行为是连续的就用 `linalg_ext.atomic_rmw`，反之则用 `linalg_ext.gather_atomic_rmw`。
 
 ```text
@@ -1912,6 +1914,9 @@ load 和 store 的结果为 scalar，直接使用 memref.load 和 memref.store �
 {: .prompt-info }
 
 ### atomic ops
+
+> triton 中的 [atomic类op](https://triton-lang.org/main/python-api/triton.language.html#atomic-ops) 除了 atomic_cas，其他都下降成 [tt.atomic_rmw](https://github.com/triton-lang/triton/blob/main/python/triton/language/semantic.py#L1188)
+{: .prompt-info }
 
 由于 atomic op(tt.atomic_cas 和 tt.atomic_rmw) 也对 ptr 进行操作了，所以也有多种下降pattern，尽量分析出连续的情况。
 

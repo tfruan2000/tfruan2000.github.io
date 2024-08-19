@@ -674,8 +674,8 @@ def max_kernel(
 ):
     pid = tl.program_id(0)
     block_start = pid * BLOCK_SIZE
-    res = other=-float("inf")
-    if ONE_TIME_PER_CTA:
+    res = -float("inf")
+    if ONE_TILE_PER_CTA:
         offset = block_start + tl.arange(0, BLOCK_SIZE)
         mask = offset < M
         inp_val = tl.load(inp + offset, mask=mask, other=-float("inf")).to(tl.float32)
@@ -688,7 +688,7 @@ def max_kernel(
             offset = off + tl.arange(0, BLOCK_SIZE)
             mask = offset < M
             inp_val = tl.load(inp + offset, mask=mask, other=-float("inf")).to(tl.float32)
-            _tmp = tl.where(_tmp > _x, _tmp, _x)
+            _tmp = tl.where(_tmp > inp_val, _tmp, inp_val)
         res = tl.max(_tmp)
 
     tl.atomic_max(out, res.to(tl.float32))

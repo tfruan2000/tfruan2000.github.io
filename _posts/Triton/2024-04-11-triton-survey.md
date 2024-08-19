@@ -28,10 +28,10 @@ gpu层次结构图如下
 
 每个 SM 都有独立的 smem, constant cache, register mem，SM之间共享 L2 Cache 和 gdram。 SM(流式多处理器) 中的处理单位称为 SP(流示处理器)。
 
-> 在 CUDA 编程中(逻辑视角)，SM 内的 L1 Cache 和 smem 一般被视为同一内存区域。
-> - 一是 Cache 对程序员是不可见的，一致看待保证了高速内存的利用率
-> - 二是数据从 L2 Cache 取到 L1 Cache 后，也不需要额外的 L1 Cache 到 smem 映射关系。
->
+> 自 Volta 架构后，SM 中的 smem 和 L1 Cache 就合并成一块 memory block 了
+> 如此程序员就可以自行配置 smem 的大小，在放存密集且连续的场景下（例如matmul），smem大一些性能更好。但是 smem 和 L1 Cache的总大小是一定的。
+> 但是L1在某些场景下也是必要的，例如以 sparse computing 中。
+
 > Hopper 架构中引入了 SM-to-SM 的高速网络，实现了 SM 之间的 smem 互相访问。这为 Thread Block Cluster 提供了编程支持。
 > Thread Block Cluster 的提出是因为以 thread block 为粒度执行任务阻碍运行效率。需要提供更大粒度的线程组。所以一个 thread block cluster 中包含多个 thread block，其中所有 thread 都可以访问负责该 thread block cluster 计算的 SM 群的 smem，这些 smem 一起称为 distributed smem。
 
