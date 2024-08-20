@@ -118,80 +118,152 @@ vector<int> maxAltitude(vector<int>& heights, int limit) {
 }
 ```
 
-# 排序
+# 树
 
-## 快排
+## 层序遍历
 
-每次挑出一个基准，比基准小的放左边，比基准大的放右边
+1. LCR 149. 彩灯装饰记录 I
 
-```cpp
-template<typename T>
-void quick_sort(T arr[], int start, int end){
-    if(start >= end)return;
-    int l = start - 1;
-    int r = end + 1;
-    T pvoit = arr[l+(r-l)/2];
-    **while(l < r){
-        do l++; while(arr[l] < pvoit);
-        do r--; while(arr[r] > pvoit);
-        if( l < r) swap(arr[l], arr[r]);
-    }**
-    quick_sort(arr, start, r);
-    quick_sort(arr, r+1, end);
-}
-```
+> 用 `queue` 实现层序遍历
+{: .prompt-info }
 
-![sort](/assets/img/blog/img_coding_note/computational_complexity.png)
+一棵圣诞树记作根节点为 root 的二叉树，节点值为该位置装饰彩灯的颜色编号。请按照从 左 到 右 的顺序返回每一层彩灯编号。
 
-- 冒泡排序：比较相邻的元素
+输入：root = [8,17,21,18,null,null,6]
+输出：[8,17,21,18,6]
 
 ```cpp
-void bubble_sort(T arr[], const int len){
-    for(int i=0; i<len; i++)
-        for(int j=0; j<len-i-1; j++)
-            // 每一轮最大的数都会被放到最后
-            if(arr[j] > arr[j+1]){
-                T tmp = arr[j];
-                arr[j] = arr[j+1];
-                arr[j+1] = tmp;
-            }
-}
-```
-
-- 插入排序：每次选择一个，然后在它左侧的数组中找到位置，其左侧是有序
-
-```cpp
-template<typename T>
-void insert_sort(T arr[], const int len){
-    int j;
-    T tmp;
-    for(int i=1; i<len; i++){
-        if(arr[i] < arr[i-1]){
-            tmp = arr[i]; // 给arr[i]找到合适的位置
-            for(j=i-1; j>=0 && arr[j]>tmp; j--)
-                arr[j+1] = arr[j]; // 左移
-        }
-        arr[j+1] = tmp;
-    }
-}
-```
-
-- 选择排序：每次选出一个最小的值
-
-```cpp
-template<typename T>
-void select_sort(T arr[], const int len){
-    for(int i=0; i<len-1; i++){
-        int min_index = i;
-        for(int j=i+1; j<len; j++)
-            if(arr[j] < arr[min_index])
-                min_index = j;
-        if(min_index != i){
-            T tmp = arr[i];
-            arr[i] = arr[min_index];
-            arr[min_index] = tmp;
+vector<int> decorateRecord(TreeNode* root) {
+    if (root == nullptr) return {};
+    vector<int> res;
+    std::queue<TreeNode *> q;
+    q.push(root);
+    while (!q.empty()) {
+        TreeNode* now = q.front();
+        q.pop();
+        if (now != nullptr) {
+            res.push_back(now->val);
+            q.push(now->left);
+            q.push(now->right);
         }
     }
+    return res;
+}
+```
+
+## 递归
+
+### 先序遍历
+
+1. LCR 143. 子结构判断
+
+给定两棵二叉树 tree1 和 tree2，判断 tree2 是否以 tree1 的某个节点为根的子树具有 相同的结构和节点值 。
+
+```cpp
+bool isSame(TreeNode *A, TreeNode *B) {
+    if (B == nullptr) return true;
+    if (A == nullptr) return false;
+    return A->val == B->val && isSame(A->left, B->left) && isSame(A->right, B->right);
+}
+bool isSubStructure(TreeNode* A, TreeNode* B) {
+    if (A == nullptr || B == nullptr) return false;
+    // 判断 以A为根、以A->left为根、以A->right为根
+    return isSame(A, B) || isSubStructure(A->left, B) || isSubStructure(A->right, B);
+```
+
+### 中序遍历
+
+1. LCR 155. 将二叉搜索树转化为排序的双向链表
+
+将一个 二叉搜索树 就地转化为一个 已排序的双向循环链表 。
+
+```cpp
+Node *pre;
+Node *firstShit;
+void dfs(Node *curr) {
+    if (curr == nullptr) return;
+    dfs(curr->left);
+    if (pre) {
+        // pre 作为 curr 的左侧
+        curr->left = pre;
+        pre->right = curr;
+    }
+    pre = curr;
+    dfs(curr->right);
+}
+Node* treeToDoublyList(Node* root) {
+    if (root == nullptr) return nullptr;
+    firstShit = root;
+    while (firstShit->left) {
+        firstShit = firstShit->left;
+    }
+    pre = nullptr;
+    dfs(root);
+    // 把头和尾连起来
+    pre->right = firstShit;
+    firstShit->left = pre;
+    return firstShit;
+}
+```
+
+另一种解法：递归，认为 treeToDoublyList 返回一定是有序的
+
+```cpp
+Node* treeToDoublyList(Node* root) {
+    if (root == nullptr) return nullptr;
+    Node *firstShit = root;
+    Node *lastShit = root;
+    // treeToDoublyList 返回的一定是有序的
+    Node *leftN = treeToDoublyList(root->left);
+    Node *rightN = treeToDoublyList(root->right);
+    if (leftN) {
+        // 当前的 firstShit 应该直接接到 leftN 的后面
+        leftN->left->right = firstShit;
+        firstShit->left = leftN->left;
+        firstShit = leftN;
+    }
+    if (rightN) {
+        // 当前的 lastShit 应该直接接到 rightN 的前
+        Node *tmp = rightN->left;
+        lastShit->right = rightN;
+        rightN->left = lastShit;
+        lastShit = tmp;
+    }
+    firstShit->left = lastShit;
+    lastShit->right = firstShit;
+    return firstShit;
+}
+```
+
+2. LCR 174. 寻找二叉搜索树中的目标节点
+
+某公司组织架构以二叉搜索树形式记录，节点值为处于该职位的员工编号。请返回**第 cnt 大**的员工编号。（右根左）
+
+```cpp
+int count = 0;
+int res = 0;
+int findTargetNode(TreeNode* root, int cnt) {
+    dfs(root, cnt);
+    return res;
+}
+void dfs(TreeNode *curr, int cnt) {
+    if (curr == nullptr) return;
+    dfs(curr->right, cnt); // 先往右走到底，再count++
+    ++count;
+    if (count == cnt) res = curr->val;
+    dfs(curr->left, cnt);
+}
+```
+
+如果是返回**第 cnt 小**的员工编号，则是左根右
+
+```cpp
+void dfs(TreeNode *curr, int cnt) {
+    if (curr == nullptr) return;
+    dfs(curr->left, cnt); // 先往左走到底，再count++
+    ++count;
+    if (count == cnt) res = curr->val;
+    dfs(curr->right, cnt);
 }
 ```
 
@@ -382,153 +454,147 @@ bool cmp(int lhs, int rhs) {
 }
 ```
 
-# 树
+# 排序
 
-## 层序遍历
+## 基础模版
 
-1. LCR 149. 彩灯装饰记录 I
+- 快排
 
-> 用 `queue` 实现层序遍历
-{: .prompt-info }
-
-一棵圣诞树记作根节点为 root 的二叉树，节点值为该位置装饰彩灯的颜色编号。请按照从 左 到 右 的顺序返回每一层彩灯编号。
-
-输入：root = [8,17,21,18,null,null,6]
-输出：[8,17,21,18,6]
+每次挑出一个基准，比基准小的放左边，比基准大的放右边
 
 ```cpp
-vector<int> decorateRecord(TreeNode* root) {
-    if (root == nullptr) return {};
-    vector<int> res;
-    std::queue<TreeNode *> q;
-    q.push(root);
-    while (!q.empty()) {
-        TreeNode* now = q.front();
-        q.pop();
-        if (now != nullptr) {
-            res.push_back(now->val);
-            q.push(now->left);
-            q.push(now->right);
+template<typename T>
+void quick_sort(T arr[], int start, int end){
+    if(start >= end)return;
+    int l = start - 1;
+    int r = end + 1;
+    T pvoit = arr[l+(r-l)/2];
+    while(l < r){
+        do l++; while(arr[l] < pvoit);
+        do r--; while(arr[r] > pvoit);
+        if( l < r) swap(arr[l], arr[r]);
+    }
+    quick_sort(arr, start, r);
+    quick_sort(arr, r+1, end);
+}
+```
+
+![sort](/assets/img/blog/img_coding_note/computational_complexity.png)
+
+- 冒泡排序：比较相邻的元素
+
+```cpp
+void bubble_sort(T arr[], const int len){
+    for(int i=0; i<len; i++)
+        for(int j=0; j<len-i-1; j++)
+            // 每一轮最大的数都会被放到最后
+            if(arr[j] > arr[j+1]){
+                T tmp = arr[j];
+                arr[j] = arr[j+1];
+                arr[j+1] = tmp;
+            }
+}
+```
+
+- 插入排序：每次选择一个，然后在它左侧的数组中找到位置，其左侧是有序
+
+```cpp
+template<typename T>
+void insert_sort(T arr[], const int len){
+    int j;
+    T tmp;
+    for(int i=1; i<len; i++){
+        if(arr[i] < arr[i-1]){
+            tmp = arr[i]; // 给arr[i]找到合适的位置
+            for(j=i-1; j>=0 && arr[j]>tmp; j--)
+                arr[j+1] = arr[j]; // 左移
+        }
+        arr[j+1] = tmp;
+    }
+}
+```
+
+- 选择排序：每次选出一个最小的值
+
+```cpp
+template<typename T>
+void select_sort(T arr[], const int len){
+    for(int i=0; i<len-1; i++){
+        int min_index = i;
+        for(int j=i+1; j<len; j++)
+            if(arr[j] < arr[min_index])
+                min_index = j;
+        if(min_index != i){
+            T tmp = arr[i];
+            arr[i] = arr[min_index];
+            arr[min_index] = tmp;
+        }
+    }
+}
+```
+
+```cpp
+vector<int> quick_sort(vector<int>& stock, int cnt, int start, int end) {
+    // 快速排序
+    int l = start, r = end;
+    int base = start;
+    while (l < r) {
+        while (l < r && stock[base] <= stock[r]) r--;
+        while (l < r && stock[base] >= stock[l]) l++;
+        swap(stock[l], stock[r]);
+    }
+    swap(stock[l], stock[base]);
+    // 一直找第cnt的位置
+    if (cnt < l) return quick_sort(stock, cnt, start, l - 1);
+    if (cnt > l) return quick_sort(stock, cnt, l + 1, end);
+    vector<int> ans;
+    ans.assign(stock.begin(), stock.begin() + cnt);
+    return ans;
+}
+vector<int> inventoryManagement(vector<int>& stock, int cnt) {
+    int size = stock.size();
+    if (cnt == 0) return {};
+    if (size == 0 || cnt == size) return stock;
+    return quick_sort(stock, cnt, 0, size - 1);
+}
+```
+
+## 例题
+
+1. LCR 159. 库存管理 III
+
+仓库管理员以数组 stock 形式记录商品库存表，其中 stock[i] 表示对应商品库存余量。请返回库存余量最少的 cnt 个商品余量，返回 顺序不限。
+
+即选出前n个最小的 -> 思路一：选择排序，每次选一个最小的，压入res； 思路二：快速排序，选择定好基准，左边都小于基准，右边都大于
+
+- 选择排序
+
+```cpp
+vector<int> inventoryManagement(vector<int>& stock, int cnt) {
+    int size = stock.size();
+    if (size == 0 || cnt == size ) return stock;
+    vector<int> res(cnt);
+    // 选择排序
+    for (int i = 0; i < cnt; ++i) {
+        int min_idx = i;
+        for (int j = i + 1; j < size ; ++j) {
+            if (stock[min_idx] > stock[j]) min_idx = j;
+        }
+        res[i] = stock[min_idx];
+        if (i != min_idx) {
+            int tmp = stock[i];
+            stock[i] = stock[min_idx];
+            stock[min_idx] = tmp;
         }
     }
     return res;
 }
 ```
 
-## 递归
-
-### 先序遍历
-
-1. LCR 143. 子结构判断
-
-给定两棵二叉树 tree1 和 tree2，判断 tree2 是否以 tree1 的某个节点为根的子树具有 相同的结构和节点值 。
+- 快速排序
 
 ```cpp
-bool isSame(TreeNode *A, TreeNode *B) {
-    if (B == nullptr) return true;
-    if (A == nullptr) return false;
-    return A->val == B->val && isSame(A->left, B->left) && isSame(A->right, B->right);
-}
-bool isSubStructure(TreeNode* A, TreeNode* B) {
-    if (A == nullptr || B == nullptr) return false;
-    // 判断 以A为根、以A->left为根、以A->right为根
-    return isSame(A, B) || isSubStructure(A->left, B) || isSubStructure(A->right, B);
-```
 
-### 中序遍历
-
-1. LCR 155. 将二叉搜索树转化为排序的双向链表
-
-将一个 二叉搜索树 就地转化为一个 已排序的双向循环链表 。
-
-```cpp
-Node *pre;
-Node *firstShit;
-void dfs(Node *curr) {
-    if (curr == nullptr) return;
-    dfs(curr->left);
-    if (pre) {
-        // pre 作为 curr 的左侧
-        curr->left = pre;
-        pre->right = curr;
-    }
-    pre = curr;
-    dfs(curr->right);
-}
-Node* treeToDoublyList(Node* root) {
-    if (root == nullptr) return nullptr;
-    firstShit = root;
-    while (firstShit->left) {
-        firstShit = firstShit->left;
-    }
-    pre = nullptr;
-    dfs(root);
-    // 把头和尾连起来
-    pre->right = firstShit;
-    firstShit->left = pre;
-    return firstShit;
-}
-```
-
-另一种解法：递归，认为 treeToDoublyList 返回一定是有序的
-
-```cpp
-Node* treeToDoublyList(Node* root) {
-    if (root == nullptr) return nullptr;
-    Node *firstShit = root;
-    Node *lastShit = root;
-    // treeToDoublyList 返回的一定是有序的
-    Node *leftN = treeToDoublyList(root->left);
-    Node *rightN = treeToDoublyList(root->right);
-    if (leftN) {
-        // 当前的 firstShit 应该直接接到 leftN 的后面
-        leftN->left->right = firstShit;
-        firstShit->left = leftN->left;
-        firstShit = leftN;
-    }
-    if (rightN) {
-        // 当前的 lastShit 应该直接接到 rightN 的前
-        Node *tmp = rightN->left;
-        lastShit->right = rightN;
-        rightN->left = lastShit;
-        lastShit = tmp;
-    }
-    firstShit->left = lastShit;
-    lastShit->right = firstShit;
-    return firstShit;
-}
-```
-
-2. LCR 174. 寻找二叉搜索树中的目标节点
-
-某公司组织架构以二叉搜索树形式记录，节点值为处于该职位的员工编号。请返回**第 cnt 大**的员工编号。（右根左）
-
-```cpp
-int count = 0;
-int res = 0;
-int findTargetNode(TreeNode* root, int cnt) {
-    dfs(root, cnt);
-    return res;
-}
-void dfs(TreeNode *curr, int cnt) {
-    if (curr == nullptr) return;
-    dfs(curr->right, cnt); // 先往右走到底，再count++
-    ++count;
-    if (count == cnt) res = curr->val;
-    dfs(curr->left, cnt);
-}
-```
-
-如果是返回**第 cnt 小**的员工编号，则是左根右
-
-```cpp
-void dfs(TreeNode *curr, int cnt) {
-    if (curr == nullptr) return;
-    dfs(curr->left, cnt); // 先往左走到底，再count++
-    ++count;
-    if (count == cnt) res = curr->val;
-    dfs(curr->right, cnt);
-}
 ```
 
 # 动态规划问题
