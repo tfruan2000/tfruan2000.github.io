@@ -86,7 +86,7 @@ const: 只强调不能被改变，可能在运行时才可知
 
 const 成员函数中可以用 mutable 改变成员变量，但不要直接把const取消，因为const函数可以修改一些和类状态无关的成员变量。
 
-3.算术移位和逻辑移位
+13.算术移位和逻辑移位
 
 - 算术右移(`<<`)会保留符号位，右移时符号位会继续复制到最新的最高位 (arith.shrsi)
 
@@ -94,13 +94,48 @@ const 成员函数中可以用 mutable 改变成员变量，但不要直接把co
 
 - 算术和逻辑左移相同 (arith.shli)
 
+14.作用域
+
+比如 if、func这些，块内声明的变量作用域局限在块内。一些程序语言允许块内和快外同名，但有些不可以(java)
+
+15.栈帧
+
+程序执行就是进入和退出一个个作用域的过程，这个过程使用栈实现，当进入一个新作用域时会压入一个栈帧，栈帧包含当前作用域的所有局部变量，当退出这个作用域时，栈帧弹出。
+
+如果这个作用域内有定义指针，这个指针也是临时变量，会指向堆上的一片内存，需要在作用域结束前手动释放。
+
+16.python中的super
+
+基础用法：重载了父类的函数后，使用super调用父类的该函数。实际上python是使用MRO列表中的下一个对应函数来返回。
+
+17.include guard
+
+`pragma once` 防止头文件被引用多次，保证头文件只被编译一次
+
+mlir的项目中，头文件的写法都有传统的include guard，用 `ifdef` 的方法代码移植性更好。
+
+```cpp
+#ifdef TRITON_LINALG_CONVERSION_ARITHTOLINALG_ARITHTOLINALG_H
+#define TRITON_LINALG_CONVERSION_ARITHTOLINALG_ARITHTOLINALG_H
+
+...
+
+#endif TRITON_LINALG_CONVERSION_ARITHTOLINALG_ARITHTOLINALG_H
+```
+
+18.智能指针
+
+```cpp
+std::unique_ptr<Pass>
+```
+
 # arch
 
-barrier是核间的，sync是核内的
+1.barrier是核间的，sync是核内的
 
-workgroup其实是onencl的术语，对应cuda就是逻辑上的block
+2.workgroup其实是onencl的术语，对应cuda就是逻辑上的block
 
-一个kernel有一个grid，一个grid有多个block，一个block有多个thread（按warp）分组
+3.一个kernel有一个grid，一个grid有多个block，一个block有多个thread（按warp）分组
 
 每个Grid可以最多创建65535个block，每个Block最多512个thread
 
@@ -112,7 +147,7 @@ workgroup其实是onencl的术语，对应cuda就是逻辑上的block
 
 越高访存层次的访问latency越小
 
-把一个个block分配给SM进行运算；而block中的thread又会以warp（线程束）为单位，对thread进行分组计算。目前CUDA的warp大小都是32，也就是说32个thread会被组成一个warp来一起执行。同一个warp中的thread执行的指令是相同的，只是处理的数据不同
+4.把一个个block分配给SM进行运算；而block中的thread又会以warp（线程束）为单位，对thread进行分组计算。目前CUDA的warp大小都是32，也就是说32个thread会被组成一个warp来一起执行。同一个warp中的thread执行的指令是相同的，只是处理的数据不同
 
 基本上warp 分组的动作是由SM 自动进行的，会以连续的方式来做分组。比如说如果有一个block 里有128 个thread 的话，就会被分成四组warp，第0-31 个thread 会是warp 1、32-63 是warp 2、64-95是warp 3、96-127 是warp 4。而如果block 里面的thread 数量不是32 的倍数，那他会把剩下的thread独立成一个warp
 
@@ -120,9 +155,10 @@ workgroup其实是onencl的术语，对应cuda就是逻辑上的block
 
 一个SM 可以处理多个线程块block，当其中有block 的所有thread 都处理完后，他就会再去找其他还没处理的block 来处理。
 
-thread block cluster
+5.thread block cluster
 
 一个Block的Thread配较少时->执行慢
+
 一个Block的Thread配较多时->SM利用率低，且block可使用的smem有限，当负责的任务规模较大时，则需要使用gdram，使得IO成为瓶颈
 
 以block为粒度来处理任务阻碍运行效率，需要提供更大粒度的线程组
@@ -132,6 +168,13 @@ thread block cluster是更大粒度的线程组，其中的线程组可以访问
 smem和SM的L1Cache共用一块物理空间，但Cache是不可见的，而smem是程序员可见的，这是SM私有（L2 Cache是共用的）。但若thread block cluster的block在多个SM上运行，就需要特殊的结构实现SM的smem共享。
 
 Hopper在L1和L2之间加了SM-2-SM Network，实现SM1可以访问SM2的L1 Cache
+
+6.gdram-smem memcopy的流程：
+
+(1)虚拟地址转物理地址
+(2)ROB申请空间，以便于(乱序执行时)提交时获得正确的目的地址
+(3)发送总线请求到LLC
+(4)LLC命中则返回，失败则从gdram中找
 
 # MLIR
 

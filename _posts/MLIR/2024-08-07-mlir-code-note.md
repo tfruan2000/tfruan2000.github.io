@@ -187,6 +187,78 @@ mlir/include/mlir/Pass/AnalysisManager.h
 
 但使用 `markAnalysesPreserved` 在 `pass` 间传递信息的行为是不可取的，因为该功能只是为了减少编译时间，要在 `pass` 间传递信息最合理的方法是设计一套 `Attribute` 挂在 op上。
 
+## Dataflow Analysis
+
+### 概念
+
+以下相关概念引自 南大[软件分析](https://zhuanlan.zhihu.com/p/110050716) 课程。
+
+基础概念：
+
+- statement
+
+statement 是 CFG(control flow grap) 中的基本程序块。可以把IR当成statement。
+
+- program point
+
+program state 是 statement 前后变量的状态。
+
+数据流分析理论中，每个 program state 都关联了一个 program point 点，如下图，图源[南大软件分析课程](https://www.bilibili.com/video/BV1oE411K79d/?vd_source=29858f685ca867d754c4c0b13af98cb4)。
+
+![program point](/assets/img/blog/img_mlir_note/data_flow_analysis1.png)
+
+ProgramPoint 是 DataFlowAnalysis 中的基石，每次分析都是从一个 point 对象出发，visit 到更多的 point 对象。
+
+- data flow values
+
+静态分析完成标志：给每个program point都关联一个值（data flow values），这个值表示这个program state在那个点所有可能值的抽象
+
+- fix point
+
+在数据流分析中，用来描述数据数据流中信息的变化和融合的是 SemiLattice 理论。例如，在进行活跃性分析时，使用交半格可以跟踪不同数据流中变量活跃性的最小公共集合。这部分的内容可以参考南大《软件分析》课程的[数据流分析](https://www.bilibili.com/video/BV1oE411K79d/?vd_source=29858f685ca867d754c4c0b13af98cb4)。
+
+fixedpoint 即 所有 program point 都关联一个值(data flow values)，这个值表示 program state 在那个点**所有**可能值的抽象。
+
+SemiLattice 是用来做两个 program point 的 data flow values 的 交汇(meet)操作（对于集合来说，就是并集/交集）。
+
+所谓 fixedpoint iteration 算法其实是利用了 SemiLattice 的特性，保证迭代过程中一定存在一个上界(并集)/下界(交集)，即 fixpoint。
+
+- 设计一个 data flow analysis
+
+三要素：Data Flow Values，Transfer Function和Control-flow Handing
+
+(1) Data Flow Values: 定义 Lattice 中需要包含哪些 value，除了集合，也可能是一个值
+
+(2) Transfer Function：定义如何前进，前向分析一般就是 `out[s] = func(in[s])`
+
+(3) Control-flow Handing： 定义 Lattice 交汇时的行为，并集还是交集需要具体问题具体分析
+
+> 也有某些地方称为五要素 "方向（D）、值（V）、转换函数（F）、初始值（I）和交运算（Λ）"，其中方向一般有 forward 和 backward。不同方向下转换一般不同。
+{: .prompt-info }
+
+### 流程举例
+
+引用[编译原理之美28](https://learn.lianglianglee.com/%e4%b8%93%e6%a0%8f/%e7%bc%96%e8%af%91%e5%8e%9f%e7%90%86%e4%b9%8b%e7%be%8e/28%20%e6%95%b0%e6%8d%ae%e6%b5%81%e5%88%86%e6%9e%90%ef%bc%9a%e4%bd%a0%e5%86%99%e7%9a%84%e7%a8%8b%e5%ba%8f%ef%bc%8c%e5%ae%83%e6%9b%b4%e6%87%82.md)博客中的相关内容补充说明一下相关概念。
+
+下图是对一个CFG的 liveness 分析结果，每个块当作是一个 program point，每个 point 前后(前: 输入变量，后: 输出变量)是可以观察到的所有元素集合(data flow values)。
+
+> 当分支相遇的时，需要取两个分支的并集。即图中块4的入口 program point 的 value 等于 块2、块3出口 program point 的 value 的并集。
+{: .prompt-info }
+
+![liveness](/assets/img/blog/img_mlir_note/liveness.png)
+
+当然基于上述图，所有 data flow values 中可以删除掉和变量 y 以及相关内容
+
+![liveness1](/assets/img/blog/img_mlir_note/liveness1.png)
+
+依次删除掉不活跃变量(y 和 d)后，CFG可简化为下图
+
+![liveness2](/assets/img/blog/img_mlir_note/liveness2.png)
+
+这就针对当前的 CFG 完成了 DCE(Dead Code Eliminate)。
+
+但如果 CFG 中存在回路，例如 for 循环操作(在 MLIR 中常常表现为 RegionBranchOpInterface) 时，相关 program point 中 value 将会增加很多(对所有节点进行多次计算，直到所有value中内容稳定为止)。
+
 ## Dataflow Framework
 
 ```bash
@@ -211,23 +283,11 @@ enum class [[nodiscard]] ChangeResult {
 
 MLIR 中的 ProgramPoint 是一个 `PointerUnion`，可以是 `Operation *, Value, Block *`
 
-ProgramPoint 是 DataFlowAnalysis 中的基石，每次分析都是从一个 point 对象出发，visit 到更多的 point 对象。
-
-数据流分析理论中，每个 program state 前后都有一个 program point 点，如下图，图源[南大软件分析课程](https://www.bilibili.com/video/BV1oE411K79d/?vd_source=29858f685ca867d754c4c0b13af98cb4)。
-
-![program point](/assets/img/blog/img_mlir_note/data_flow_analysis1.png)
-
 3.DataFlowSolver
 
 实现 child data-flow analyses，使用的是 fixedpoint iteration 算法。
 
 一直维护 `AnalysisState` 和 `ProgramPoint` 信息。
-
-> 在数据流分析中，用来描述数据数据流中信息的变化和融合的是 SemiLattice 理论。例如，在进行活跃性分析时，使用交半格可以跟踪不同数据流中变量活跃性的最小公共集合。这部分的内容可以参考南大《软件分析》课程的[数据流分析](https://www.bilibili.com/video/BV1oE411K79d/?vd_source=29858f685ca867d754c4c0b13af98cb4)。
-> 所谓 fixedpoint iteration 算法其实是利用了 SemiLattice 的特性，保证迭代过程中一定存在一个上界，即 fixpoint。
-> fixedpoint 即 所有 program point 都关联一个值(data flow value)，这个值表示 program state 在那个点所有可能值的抽象。
-> 强烈推荐 南大[软件分析](https://zhuanlan.zhihu.com/p/110050716) 课程，帮助大家了解相关的概念。
-{: .prompt-info }
 
 数据流分析的流程：
 
@@ -503,11 +563,17 @@ ArrayAttr tmp = ArrayAttr::get(context, mappings)
 - getValue() 对于IntegertAttr会返回APInt，之后一般可以接 `getSExtValue()` ，来将APInt转为**int64_t**
 
 - src : operation*
-  - getAttr / getAttrOfType ，一般get完之后要cast到对应的AttrType，例如
+  - getAttr / getAttrOfType ，一般get完之后要dyn_cast(可能cast失败，所以要判空)到对应的AttrType，例如
 
     ```cpp
     op->getAttr(getAliasAttrKey()).dyn_cast_or_null<mlir::IntegerAttr>()
     op->getAttrOfType<DenseI64ArrayAttr>
+    constexpr llvm::StringLiteral getXXXAttrKey() {
+      return llvm::StringLiteral("sadkjasd");
+    }
+    auto attr = op->getAttrOfType<BoolAttr>(getXXXAttrKey());
+    if (attr)
+      return attr.getValue();
     ```
 
   - hasAttr / hasAttrOfType

@@ -599,6 +599,51 @@ vector<int> inventoryManagement(vector<int>& stock, int cnt) {
 
 # 动态规划问题
 
+动归问题的关键是：
+
+1.状态转移函数
+
+2.dp初始化
+
+以 LCR 166. 珠宝的最高价值 为例
+
+现有一个记作二维矩阵 frame 的珠宝架，其中 frame[i][j] 为该位置珠宝的价值。拿取珠宝的规则为：
+
+只能从架子的左上角开始拿珠宝 -> 从 dp[0][0] 出发
+
+每次可以移动到右侧或下侧的相邻位置 -> dp[i][j] 只能转移到 dp[i+1][j] 或 dp[i+1][j]
+
+到达珠宝架子的右下角时，停止拿取 -> 结束点为 dp[maxi][maxj]
+
+注意：珠宝的价值都是大于 0 的。除非这个架子上没有任何珠宝，比如 frame = [[0]]。
+
+```cpp
+// 状态转移函数 res[i][j] = max(res[i-1][j], res[i][j-1]) + frame[i][j]
+int jewelleryValue(vector<vector<int>>& frame) {
+    if (frame.size() == 0) return 0;
+    int maxi = frame.size();
+    int maxj = frame[0].size();
+    vector<vector<int>> res(maxi, vector<int>(maxj));
+    res[0][0] = frame[0][0];
+    for (int i = 0; i < maxi; ++i) {
+        for (int j = 0; j < maxj; ++j) {
+            if (i == 0) {
+                if (j > 0) {
+                    res[0][j] = res[0][j-1] + frame[0][j];
+                }
+                continue;
+            }
+            if (j == 0) {
+                res[i][0] = res[i - 1][0] + frame[i][0];
+                continue;
+            }
+            res[i][j] = std::max(res[i-1][j], res[i][j-1]) + frame[i][j];
+        }
+    }
+    return res[maxi - 1][maxj - 1];
+}
+```
+
 ## 背包问题
 
 dp[i][j]表示将前i种物品装进限容量为j的背包可以获得的最大价值, 0<=i<=N, 0<=j<=V
