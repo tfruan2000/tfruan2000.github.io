@@ -204,6 +204,22 @@ Canonicalize shouldn't lose the semantic of original operation:
   - broadcast(3200 -> 1x3200) -> collapse_shape + expand_shape
   - reduce(1x3200x1 -> 3200) -> collapse_shape + map + expand_shape
 
+6. forall
+
+- grid 显示地表示了 host func
+
+```text
+func {
+  ops1 // gmem
+  forall1 {
+    ops2 // smem
+    forall2 {
+      ops3
+    }
+  }
+}
+```
+
 # LLM note
 
 QK的相似度计算不用除以模长：长度也是比较重要的信息，一般来说两个词向量的模长表示它们之间的重要性。当然也可以除，后续在softmax时除以一个数来扩大范围，但是这样计算量大了效果不一定有提升

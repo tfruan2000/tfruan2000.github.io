@@ -747,12 +747,12 @@ def max_kernel(
     # 即 NUM_BLOCK_N = 64， BLOCK_SIZE_N = 1024
     pid_m = tl.program_id(0)
     pid_n = tl.program_id(1)
-    num_jobs = tl.num_programs(axis=0) # triton.cdiv(MAX_GRID_NUM, meta["NUM_BLOCK_N"])
-    row_per_job = (M + num_jobs - 1) // num_jobs # 每次处理 64 行
+    num_jobs_m = tl.num_programs(axis=0) # triton.cdiv(MAX_GRID_NUM, meta["NUM_BLOCK_N"])
+    row_per_job = (M + num_jobs_m - 1) // num_jobs_m # 每次处理 64 行
 
     row_begin = pid_m * row_per_job
     row_end = row_begin + row_per_job
-    if pid_m == (num_jobs - 1): # 注意末尾边界
+    if pid_m == (num_jobs_m - 1): # 注意末尾边界
         row_end = M
 
     for row_idx in range(row_begin, row_end): # 相当于这里要循环 64 次

@@ -166,6 +166,8 @@ mask 为遮盖，类似decoder Attn中的mask。一是规范访存行为，防�
 
 - @triton.jit：表示下面这段代码是一个triton kernel
 
+> `@triton.jit` 中还可以传一个参数 `do_not_specialize`，来阻止 triton 生成过多的 kernel。 triton jit 会以每一个非指针参数为准，去生成一个kernel，比如某一个参数运行时取值可能为1或0，那么 triton 就会为它们各生成一个。
+
 - @[auto-tuning](https://triton-lang.org/main/python-api/generated/triton.autotune.html) ：由 `@triton.jit`装饰的kernel可以调用 `@auto-tuning` detector触发自动调优
 
 使用上需要提供一个configs（包含在kernel中定义的 `tl.constexpr`）列表，autotune会多次运行kernel函数来评估configs中的所有配置。（配置是人为给出的，所以空间不大，依赖人为经验）

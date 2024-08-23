@@ -4056,8 +4056,10 @@ static Operation *tileOpImpl(PDLResultList &results, Value value) {
 
 void registerRuleFunctions(RewritePatternSet &patterns) {
   auto &patternModule = patterns.getPDLPatterns();
+  // 这些 pattern 的实现见后文
   patternModule.registerRewriteFunction("tileOp", tileOpImpl);
   patternModule.registerRewriteFunction("tilingLoopSizeLimit", tilingLoopSizeLimitImpl);
+  patternModle.registerConstraintFunction("tilingLoopSizeLimit", tilingLoopSizeLimitImpl)
   ...
 }
 ```
@@ -4065,6 +4067,44 @@ void registerRuleFunctions(RewritePatternSet &patterns) {
 ## rewrite pattern impl
 
 ```cpp
+static FailureOr<Value> getLastMatchOpAndSetRewriter(
+    PatternRewriter &rewriter, Operation *op) {
+  if (auto moduleOp = op->getParentOfType<ModuleOp>()) {
+    Block &block1 = moduleOp.getRegion().front();
+    transform::SequenceOp lastSeq;
+    auto iter = block1.rbegin();
+    while (iter != block1.rend()) {
+      if (auto seq = dyn_cast_if_present<transform::SequenceOp>(*iter)) {
+        lastSeq = seq;
+        break;
+      }
+      ++iter;
+    }
+    if (lastSeq) {
+      Block &block2 = lastSeq.getRegion().front();
+      iter = block2.rbegin();
+      transform::MatchOp lastMatch;
+      while (iter != block2.rend()) {
+        if (auto match = dyn_cast_if_present<transform::MatchOp>(*iter)) {
+          lastMatch = match;
+          break;
+        }
+        ++iter;
+      }
+      if (lastMatch) {
+        rewriter.setInsertionPointAfter(lastMatch);
+        return lastMatch.getResult();
+      }
+    }
+  }
+  return failure();
+}
+
+static Value getTargetHandle(PatternRewriter &rewriter, value &handle,
+                             Operation *op) {
+  return rewriter.create<transform::MatchOp>(...)
+}
+
 //===----------------------------------------------------------------------===//
 // rewrite methods
 //===----------------------------------------------------------------------===//
@@ -4073,15 +4113,16 @@ static void tileOpImpl(PatternRewriter &rewriter, Operation *op,
                        ArrayAttr tileSize) {
   DBGS() << "Enter rewrite rule [tileOp], with target op: ";
   LLVM_DEBUG(op->print(DBGS()));
-  Value funcHandle = getFuncHandleAndSetRewriter(rewriter, op); // 先找到对func matchop
+  auto handle = getLastMatchOpSetRewriter(rewriter, op); // 当前 transform sequence 中最后一个 matchOp
+  if (failed(handle)) return;
   MLIRContext *context = op->getContext();
   auto pdlOpType = pdl::OperationType::get(context);
-  Value anchor = getAnchorHandle(rewriter, funcHandle, op); // 生成对target的match op
+  Value target = getTargetHandle(rewriter, *handle, op); // 生成对target的match op
   tileSize = tileSize.empty() ? nullptr : tileSize;
   rewriter.create<transform::TileToForallOp>(
       rewriter.getUnknownLoc(),
       /*resultTypes=*/TypeRange({pdlOpType, pdlOpType}),
-      /*target=*/anchor,
+      /*target=*/target,
       /*tile_sizes=*/tileSize,);
 }
 
