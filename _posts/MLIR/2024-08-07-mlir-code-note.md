@@ -540,6 +540,12 @@ mlir/include/mlir/IR/Attribute.h
 - BoolAttr
 - ArrayAttr
 - DictionaryAttr
+- DenseElementsAttr
+
+```cpp
+auto value = constantOp.getValue().dyn_cast<DenseElementsAttr>();
+if (value && value.isSplat()) // 一个 DenseElementsAttr 如果是 splat 的，那么所有值都相同
+```
 
 常用方法：
 
@@ -3521,9 +3527,21 @@ auto val = getValueOrCreateConstantIndexOp(...)
 if (mathPattern(val, m_Zero())) // 判断 val 是否是立即数0 或 constant(0)
 ```
 
-- `matchPattern(val, m_Zero())`
+- matchPattern(val, m_Zero())
 - matchPattern(Operation *, Pattern)
 - matchPattern(Attribute, Pattern)
+
+```cpp
+///   %cst = arith.constant 4.0 : f32
+///   %0 = arith.divf %arg0, %cst : f32
+auto divisor = op.getRhs();
+FloatAttr divisorAttr;
+if (matchPattern(divisor, m_Constant(divisorAttr))) {
+  // 如果 match 成功了，divisorAttr 会被赋值
+  auto divisorVal = divisorAttr.getValue().convertToDouble(); // APFloat -> Double
+  ...
+}
+```
 
 实现形式例如: (对于不同类型的输入，都有一个 `match` 函数)
 
@@ -4056,10 +4074,8 @@ static Operation *tileOpImpl(PDLResultList &results, Value value) {
 
 void registerRuleFunctions(RewritePatternSet &patterns) {
   auto &patternModule = patterns.getPDLPatterns();
-  // 这些 pattern 的实现见后文
   patternModule.registerRewriteFunction("tileOp", tileOpImpl);
   patternModule.registerRewriteFunction("tilingLoopSizeLimit", tilingLoopSizeLimitImpl);
-  patternModle.registerConstraintFunction("tilingLoopSizeLimit", tilingLoopSizeLimitImpl)
   ...
 }
 ```
@@ -4067,44 +4083,6 @@ void registerRuleFunctions(RewritePatternSet &patterns) {
 ## rewrite pattern impl
 
 ```cpp
-static FailureOr<Value> getLastMatchOpAndSetRewriter(
-    PatternRewriter &rewriter, Operation *op) {
-  if (auto moduleOp = op->getParentOfType<ModuleOp>()) {
-    Block &block1 = moduleOp.getRegion().front();
-    transform::SequenceOp lastSeq;
-    auto iter = block1.rbegin();
-    while (iter != block1.rend()) {
-      if (auto seq = dyn_cast_if_present<transform::SequenceOp>(*iter)) {
-        lastSeq = seq;
-        break;
-      }
-      ++iter;
-    }
-    if (lastSeq) {
-      Block &block2 = lastSeq.getRegion().front();
-      iter = block2.rbegin();
-      transform::MatchOp lastMatch;
-      while (iter != block2.rend()) {
-        if (auto match = dyn_cast_if_present<transform::MatchOp>(*iter)) {
-          lastMatch = match;
-          break;
-        }
-        ++iter;
-      }
-      if (lastMatch) {
-        rewriter.setInsertionPointAfter(lastMatch);
-        return lastMatch.getResult();
-      }
-    }
-  }
-  return failure();
-}
-
-static Value getTargetHandle(PatternRewriter &rewriter, value &handle,
-                             Operation *op) {
-  return rewriter.create<transform::MatchOp>(...)
-}
-
 //===----------------------------------------------------------------------===//
 // rewrite methods
 //===----------------------------------------------------------------------===//
@@ -4113,16 +4091,15 @@ static void tileOpImpl(PatternRewriter &rewriter, Operation *op,
                        ArrayAttr tileSize) {
   DBGS() << "Enter rewrite rule [tileOp], with target op: ";
   LLVM_DEBUG(op->print(DBGS()));
-  auto handle = getLastMatchOpSetRewriter(rewriter, op); // 当前 transform sequence 中最后一个 matchOp
-  if (failed(handle)) return;
+  Value funcHandle = getFuncHandleAndSetRewriter(rewriter, op); // 先找到对func matchop
   MLIRContext *context = op->getContext();
   auto pdlOpType = pdl::OperationType::get(context);
-  Value target = getTargetHandle(rewriter, *handle, op); // 生成对target的match op
+  Value anchor = getAnchorHandle(rewriter, funcHandle, op); // 生成对target的match op
   tileSize = tileSize.empty() ? nullptr : tileSize;
   rewriter.create<transform::TileToForallOp>(
       rewriter.getUnknownLoc(),
       /*resultTypes=*/TypeRange({pdlOpType, pdlOpType}),
-      /*target=*/target,
+      /*target=*/anchor,
       /*tile_sizes=*/tileSize,);
 }
 
@@ -5119,6 +5096,7 @@ Value 必然包含 Type，Type 也可以作为 Attribute 附加在 Operation 上
 
 - getLayout() -> MemRefLayoutAttrInterface
   - isIdentity() : result type has no offset.
+
 - 获得dim
 
   ```cpp
@@ -5168,7 +5146,7 @@ src -> type (Value::getType())
   - getRank
   - getShape: 当该type为ranked返回 ArrayRef<int64_t> ，否则assert
   - isDynamicDim / getNumDynamicDims / getDynamicDimIndex
-
+- getElementTypeOrSelf：获得当前 Type 的 elementType
 - mlir/include/mlir/IR/TypeUtilities.h 中的一些函数
   - verifyCompatibleShape(Type lhs, Type rhs) : 比较两个Type的shape是否一致，不关心elemType
 

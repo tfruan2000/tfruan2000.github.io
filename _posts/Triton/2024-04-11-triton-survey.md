@@ -410,6 +410,8 @@ compiler在软件流水时使用。软件流水优化一般会在kernel中插入
 
 Layout：定义了Data是如何被Thread处理。这种layout attr在lowering过程中被传递，用于描述op的拆分映射关系
 
+> Block layout等 distributed layout 描述线程的访存行为；shared layout 描述smem中哪些元素会被同时访问，然后进行swizzled，防止banck conflict
+
 - **Distributed Layout：**Blocked Layout, MMA Layout, DotOperand Layout都属于此类。这些Layout的特点都是映射函数会将特定的Tensor交给特定的Thread去处理(即一个layout描述整个tensor的访问模式)，达到一个**distribution**的效果
 
 ```cpp

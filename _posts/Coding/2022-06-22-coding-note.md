@@ -10,6 +10,23 @@ tags: [Coding, Algorithm]
 
 # 双指针
 
+## 反转链表
+
+1.LCR 141. 训练计划 III
+
+给定一个头节点为 head 的单链表用于记录一系列核心肌群训练编号，请将该系列训练编号 倒序 记录于链表并返回。
+
+```cpp
+ListNode *now = head;
+ListNode *res = nullptr;
+while (now != nullptr) {
+  ListNode *tmp = now->next;
+  now->next= res;
+  res = now;
+  now = tmp;
+}
+```
+
 ## 快慢指针
 
 1. LCR 140. 训练计划 II
@@ -50,6 +67,7 @@ ListNode* trainningPlan(ListNode* l1, ListNode* l2) {
     ListNode *curr = &res; // 使用指针引用，一边遍历一边修改
     ListNode *a = l1;
     ListNode *b = l2;
+    // 归并排序的思想
     while (a != nullptr && b != nullptr) {
         if (a->val >= b->val) {
             curr->next = b;
@@ -382,8 +400,8 @@ bool trave(vector<int> &postorder, int root, inst start) {
   // 当以root为根后，剩下的部分已不存在左子/右子
   if ((left == start && right == start - 1) || (left == root && right == root - 1))
     return trave(postorder, root - 1, start);
-  if (l == r + 1)
-    return trave(postorder, l - 1, start) && trave(postorder, root - 1, r + 1);
+  if (left == right + 1)
+    return trave(postorder, left - 1, start) && trave(postorder, root - 1, right + 1);
   return false;
 }
 
@@ -458,28 +476,62 @@ bool cmp(int lhs, int rhs) {
 
 ## 基础模版
 
+![sort](/assets/img/blog/img_coding_note/computational_complexity.png)
+
 - 快排
 
 每次挑出一个基准，比基准小的放左边，比基准大的放右边
 
 ```cpp
-template<typename T>
-void quick_sort(T arr[], int start, int end){
-    if(start >= end)return;
-    int l = start - 1;
-    int r = end + 1;
-    T pvoit = arr[l+(r-l)/2];
-    while(l < r){
-        do l++; while(arr[l] < pvoit);
-        do r--; while(arr[r] > pvoit);
-        if( l < r) swap(arr[l], arr[r]);
-    }
-    quick_sort(arr, start, r);
-    quick_sort(arr, r+1, end);
+void quick_sort(vector<int> &t, int start, int end) {
+  if (start >= end) return;
+  int left = start;
+  int right = end;
+  int base = t[left];
+  while (left < right) {
+    while (left < right && t[right] >= base) --right;
+    t[left] = t[right];
+    while (left < right && t[left] <= base) ++left;
+    t[right] = t[left];
+  }
+  t[left] = base; // 别忘了这个换位
+  quick_sort(t, start, left - 1);
+  quick_sort(t, left + 1, start);
 }
 ```
 
-![sort](/assets/img/blog/img_coding_note/computational_complexity.png)
+- 归并
+
+```cpp
+bool cmp(int lhs, int rhs) {
+  return lhs > rhs;
+}
+
+void merge(std::vector<int> &vec, int left, int mid, int right) {
+  std::vector<int> tmp(right - left + 1);
+  int i = left, j = mid + 1, k = 0;
+  // 左侧和右侧都先把符合条件的放入
+  while (i <= mid && j <= right) {
+    if (cmp(vec[i], vec[j])) {
+      tmp[k++] = vec[i++];
+    } else {
+      tmp[k++] = vec[j++];
+    }
+  }
+  while (i <= mid) tmp[k++] = vec[i++];
+  while (j <= right) tmp[k++] = vec[j++];
+  for (i = 0; i < k; ++i) vec[left + i] = tmp[i];
+}
+
+void merge_sort(std::vector<int> &vec, int left, int right) {
+  if (left < right) {
+    int mid = left + (right - left) / 2;
+    merge_sort(vec, left, mid);
+    merge_sort(vec, mid + 1, right);
+    merge(vec, left, mid, right);
+  }
+}
+```
 
 - 冒泡排序：比较相邻的元素
 
@@ -889,4 +941,79 @@ void pack_multi(){
 }
 ```
 
-更更加优化：单调队列
+## 其他
+
+现需要将一根长为正整数 bamboo_len 的竹子砍为若干段，每段长度均为正整数。请返回每段竹子长度的最大乘积是多少。
+
+输入: bamboo_len = 12, 输出: 81
+
+```cpp
+if (n == 2) return 1;
+if (n == 3) return 2;
+vector<int> dp(n + 1);
+dp[1] = 1;
+dp[2] = 2;
+dp[3] = 3;
+for (int i = 4; i <=n ; ++i) {
+  int maxVal = 0;
+  // 对半拆
+  for (int j = 1; j <= i / 2; ++j) {
+    maxVal = max(maxVal, dp[j] * dp[i - j]);
+  }
+  dp[i] = maxVal;
+}
+return dp[n];
+```
+
+# 位运算
+
+1.实现了判断 n 的二进制表示中有多少个 1
+
+```cpp
+while (n != 0) {
+    count += n & 1; // 与二进制最低位 “与”
+    n = n >> 1;    // n (逻辑)右移
+}
+```
+
+2.用 `^` 和 `&` 模拟加法(a + b)
+
+```cpp
+while (b != 0) {
+  int tmp = a ^ b; // 1 ^ 1 = 0, 1 ^ 0 = 1
+  b = (a & b) << 1; // 作为进位的部分
+  a = tmp;
+}
+```
+
+`a ^ a = 0`, `0 ^ a = a` -> `^` 运算用来判断数相等
+
+`a & b` 是按位与，如果结果大于等于1
+
+3.LCR 177. 撞色搭配
+
+整数数组 sockets 记录了一个袜子礼盒的颜色分布情况，其中 sockets[i] 表示该袜子的颜色编号。礼盒中除了一款撞色搭配的袜子，每种颜色的袜子均有两只。请设计一个程序，在时间复杂度 O(n)，空间复杂度O(1) 内找到这双撞色搭配袜子的两个颜色编号。
+
+```cpp
+vector<int> sockCollocation(vector<int>& sockets) {
+  int size = sockets.size();
+  if (size == 2) return sockets;
+  int ret = 0;
+  for (int i : sockets)
+    ret ^= i; // 全部异或起来
+  int idx = 0;
+  // 找到 ret 中第一个不为 0 的位置来做分割
+  while (!(ret & 1)) {
+    ++idx;
+    ret = ret >> 1;
+  }
+  int diff = 1 << idx;
+  // 分为两组，再做一遍
+  int res1 = 0, res2 = 0;
+  for (int i : sockets) {
+    if (i & diff) res1 ^= i;
+    else res2 ^= i;
+  }
+  return {res1, res2};
+}
+```
