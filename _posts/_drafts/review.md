@@ -220,6 +220,12 @@ func {
 }
 ```
 
+7.mlir codegen
+
+mix mlir dialect -> llvm dialect -> llvm ir -> hardware intrinsics -> hardware assembly
+
+mix mlir dialect -> llvm dialect -> -> llvm ir -> ptx assembly -> 通过cuda-rt binary 转为 sass ，而不用转为 intrinsics
+
 # LLM note
 
 QK的相似度计算不用除以模长：长度也是比较重要的信息，一般来说两个词向量的模长表示它们之间的重要性。当然也可以除，后续在softmax时除以一个数来扩大范围，但是这样计算量大了效果不一定有提升

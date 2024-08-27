@@ -171,6 +171,98 @@ vector<int> decorateRecord(TreeNode* root) {
 
 ## 递归
 
+## 深度优先 DFS
+
+1. LCR 130. 衣橱整理
+
+```cpp
+int dfs(vector<vector<bool>> &visited, int i, int j, int cnt, int m, int n) {
+    auto digit = [](int k) -> int {
+        int res = 0;
+        while (k > 0) {
+            res += k % 10;
+            k = k / 10;
+        }
+        return res;
+    };
+    // 先判断取值是否合法
+    if (i == m || j == n || visited[i][j] || digit(i) + digit(j) > cnt) return false;
+    visited[i][j] = true;
+    return 1 + dfs(visited, i + 1, j, cnt, m, n) + dfs(visited, i, j + 1, cnt, m, n);
+}
+int wardrobeFinishing(int m, int n, int cnt) {
+    vector<bool> tmp(n, false);
+    vector<vector<bool>> visited(m, tmp);
+    // 向前遍历
+    return dfs(visited, 0, 0, cnt, m, n);
+}
+```
+
+2. LCR 153. 二叉树中和为目标值的路径
+
+给你二叉树的根节点 root 和一个整数目标和 targetSum ，找出所有 从根节点到叶子节点 路径总和等于给定目标和的路径。
+
+```cpp
+vector<int> tmp;
+vector<vector<int>> res;
+// dfs(root, t) = dfs(root->left, t - root->val) + dfs(root->right, t - root->val)
+void dfs(TreeNode *node, int t) {
+    if (node == nullptr)
+        return;
+    // 尝试前进
+    tmp.push_back(node->val);
+    t -= node->val;
+    if (node->left == nullptr && node->right == nullptr && t == 0) {
+        res.push_back(tmp);
+    }
+    dfs(node->left, t);
+    dfs(node->right, t);
+    // 不行就退回
+    tmp.pop_back();
+}
+
+vector<vector<int>> pathTarget(TreeNode* root, int target) {
+    if (root == nullptr) return {};
+    dfs(root, target);
+    return res;
+}
+```
+
+## 广度优化 BFS
+
+在树上表现为层序遍历
+
+## 层序遍历
+
+1. LCR 149. 彩灯装饰记录 I
+
+> 用 `queue` 实现层序遍历
+{: .prompt-info }
+
+一棵圣诞树记作根节点为 root 的二叉树，节点值为该位置装饰彩灯的颜色编号。请按照从 左 到 右 的顺序返回每一层彩灯编号。
+
+输入：root = [8,17,21,18,null,null,6]
+输出：[8,17,21,18,6]
+
+```cpp
+vector<int> decorateRecord(TreeNode* root) {
+    if (root == nullptr) return {};
+    vector<int> res;
+    std::queue<TreeNode *> q;
+    q.push(root);
+    while (!q.empty()) {
+        TreeNode* now = q.front();
+        q.pop();
+        if (now != nullptr) {
+            res.push_back(now->val);
+            q.push(now->left);
+            q.push(now->right);
+        }
+    }
+    return res;
+}
+```
+
 ### 先序遍历
 
 1. LCR 143. 子结构判断
@@ -285,101 +377,47 @@ void dfs(TreeNode *curr, int cnt) {
 }
 ```
 
-# 搜索与回溯
+# 分治与回溯
 
-## 深度优先 DFS
+## 回溯
 
-1. LCR 130. 衣橱整理
+前进一步 + 函数 + 后退一步
+
+1.LCR 129. 字母迷宫
+
+字母迷宫游戏初始界面记作 m x n 二维字符串数组 grid，请判断玩家是否能在 grid 中找到目标单词 target。
+
+注意：寻找单词时 必须 按照字母顺序，通过水平或垂直方向相邻的单元格内的字母构成，同时，同一个单元格内的字母 不允许被重复使用 。
 
 ```cpp
-int dfs(vector<vector<bool>> &visited, int i, int j, int cnt, int m, int n) {
-    auto digit = [](int k) -> int{
-        int res = 0;
-        while (k > 0) {
-            res += k % 10;
-            k = k / 10;
-        }
-        return res;
-    };
-    // 先判断取值是否合法
-    if (i == m || j == n || visited[i][j] || digit(i) + digit(j) > cnt) return false;
-    visited[i][j] = true;
-    return 1 + dfs(visited, i + 1, j, cnt, m, n) + dfs(visited, i, j + 1, cnt, m, n);
+bool trave(vector<vector<char>>& grid, string target, vector<vector<bool>> &visit, int i, int j, int idx) {
+  if (idx == target.size()) return true;
+  if (i < 0; || i == grid.size() || j < 0 || j == grid[0].size() || visit[i][j]) return false;
+  if (grid[i][j] != target[idx]) return false;
+  visit[i][j] = true; // 前进
+  if (trave(grid, target, visit, i + 1, j, idx) ||
+      trave(grid, target, visit, i - 1, j, idx) ||
+      trave(grid, target, visit, i, j + 1, idx) ||
+      trave(grid, target, visit, i, j - 1, idx))
+    return true;
+  visit[i][j] = false; // 回退
+  return false;
 }
-int wardrobeFinishing(int m, int n, int cnt) {
+bool wordPuzzle(vector<vector<char>>& grid, string target) {
+    int m = grid.size();
+    int n = grid[0].size();
     vector<bool> tmp(n, false);
-    vector<vector<bool>> visited(m, tmp);
-    // 向前遍历
-    return dfs(visited, 0, 0, cnt, m, n);
-}
-```
-
-2. LCR 153. 二叉树中和为目标值的路径
-
-给你二叉树的根节点 root 和一个整数目标和 targetSum ，找出所有 从根节点到叶子节点 路径总和等于给定目标和的路径。
-
-```cpp
-vector<int> tmp;
-vector<vector<int>> res;
-// dfs(root, t) = dfs(root->left, t - root->val) + dfs(root->right, t - root->val)
-void dfs(TreeNode *node, int t) {
-    if (node == nullptr)
-        return;
-    // 尝试前进
-    tmp.push_back(node->val);
-    t -= node->val;
-    if (node->left == nullptr && node->right == nullptr && t == 0) {
-        res.push_back(tmp);
-    }
-    dfs(node->left, t);
-    dfs(node->right, t);
-    // 不行就退回
-    tmp.pop_back();
-}
-
-vector<vector<int>> pathTarget(TreeNode* root, int target) {
-    if (root == nullptr) return {};
-    dfs(root, target);
-    return res;
-}
-```
-
-## 广度优化 BFS
-
-在树上表现为层序遍历
-
-## 层序遍历
-
-1. LCR 149. 彩灯装饰记录 I
-
-> 用 `queue` 实现层序遍历
-{: .prompt-info }
-
-一棵圣诞树记作根节点为 root 的二叉树，节点值为该位置装饰彩灯的颜色编号。请按照从 左 到 右 的顺序返回每一层彩灯编号。
-
-输入：root = [8,17,21,18,null,null,6]
-输出：[8,17,21,18,6]
-
-```cpp
-vector<int> decorateRecord(TreeNode* root) {
-    if (root == nullptr) return {};
-    vector<int> res;
-    std::queue<TreeNode *> q;
-    q.push(root);
-    while (!q.empty()) {
-        TreeNode* now = q.front();
-        q.pop();
-        if (now != nullptr) {
-            res.push_back(now->val);
-            q.push(now->left);
-            q.push(now->right);
+    vector<vector<bool>> visit(m, tmp);
+    for (int i = 0; i < m; ++i) { // 可以从任意位置开始
+        for (int j = 0; j < n; ++j) {
+            if (trave(grid, target, visit, i, j, 0)) return true;
         }
     }
-    return res;
+    return false;
 }
 ```
 
-# 分治
+## 分治
 
 将问题分为多个子问题，一段段解决再合并起来，最重要的是边界部分的处理。
 

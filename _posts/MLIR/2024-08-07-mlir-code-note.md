@@ -3029,7 +3029,17 @@ Value res = *a
 
 ## cast
 
-1.cast ：直接转换，失败时报错
+一般 cast 都是用在从基类向(具体)派生类转换。
+
+1.cast ：直接转换，失败时报错(assert)
+
+> c++ 中都 static_cast 会在编译期检查 cast 的合法性，和 llvm::cast 类似。
+>
+> c++ 中的 reinterpret_cast 用于任意 指针/引用 之间的类型转换，不检查安全性，只是重新解释。
+>
+> c++ 中的 const_cast 用于去除变量的 const 属性
+>
+> c++ 中的 dynamic_cast 类似 llvm::dyn_cast，如果 cast 失败会返回一个 nullptr。
 
 2.cast_or_null ：允许op为null作为输入，返回null
 
@@ -3341,6 +3351,13 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
 - 使用函数
   - V lookup(K key) : 在其中尝试查找key。一般来说 `SimpleOperationInfo` 都会有有自己的 `getHashValue` 和 `isEqual` 函数，这样就能根据key找到对应的value
 
+11.StringRef
+
+和 ArrayRef 一样，不能被修改，相当于一个const string。 StringRef 其实没有存储在其中数据的所有权，所以想要存储一个 StringRef 往往是不安全的。(因为data的真实memory可能随时被修改)
+
+> This class does not own the string data
+> The start of the string, in an external buffer. `const char *Data = nullptr;`
+
 ## make_range
 
 1.llvm::map_range
@@ -3350,7 +3367,7 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
 
   ```cpp
   // 将 srcDims 中的每个元素都乘以2
-  auto res = llvm::map_range(srcDims, [&](int64_t dim) { return dim * 2; });
+auto res = llvm::map_range(srcDims, [&](int64_t dim) { return dim * 2; });
 
   // 判断所有的operand的shape都相同
   assert(llvm::all_equal(llvm::map_range(op.getOperandTypes(),
