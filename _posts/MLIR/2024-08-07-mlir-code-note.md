@@ -142,7 +142,7 @@ find path/to/your/project -name '*.cpp' -o -name '*.h' | xargs clang-format -i
 
 - ConversionPattern常配合 **applyFullConversion/applyPartialConversion** 使用，用于dialect2dialect的op之间变换
 
-- RewritePattern一般用于优化变换，常配合 **applyPatternAndFoldGreedily** 使用
+- RewritePattern一般用于优化变换，常配合 **applyPatternsAndFoldGreedily** 使用
 
 ```cpp
 // OpConversionPattern
@@ -1019,7 +1019,7 @@ getBlock()
 
   ```cpp
   // 替换forallOp外的使用
-  rewriter.replaceAllUsesWithIf(workOp->getResult(0), forallOp->getResults(idx)
+  rewriter.replaceAllUsesWithIf(workOp->getResult(0), forallOp->getResults(idx),
     [&](OpOperand use) {return !forallOp->isProperAncestor(use.getOwner())
   // 仅替换当前op的使用
   rewriter.replaceUsesWithIf(emptyOp->getResult(), newEmptyOp->getResult(),
@@ -1186,7 +1186,7 @@ void runOnOperation() override {
 
 - `applyPartialConversion` ：如果结果是合法（以`ConversionTarget`参数来判断）则保留，如果非法则报错
 - `applyFullConversion` ：调用pattern对目标进行转换，直至IR满足`ConversionTarget`设置的目标合法，pattern必须成功才会产生合法的target
-- `applyPatternAndFoldGreedily`：尽可能地多次修改，pattern可以失败
+- `applyPatternsAndFoldGreedily`：尽可能地多次修改，pattern可以失败
 
 前两种常用于dialect conversion，需要多传入一个`ConversionTarget`参数，greedilyConversion一般用于优化pass
 
@@ -1447,8 +1447,11 @@ mlir/include/mlir/IR/BuiltinTypes.h
 - FloatType
   - getF32
   - getWidth
-- IndexType ：target word-size integer
+- IndexType ：target word-size integer(一般是64位)
 - IntegerType
+  - Signless: 单纯表示64位的数据，是否当作有无符号，完全根据前后ir运算
+  - Signed
+  - UnSigned
 
 用法
 
@@ -1495,7 +1498,7 @@ auto handlerID =
 ...
 RewritePatternSet patterns(context);
 patterns.add<xxx>(patterns.getContext());
-(void)applyPatternAndFoldGreedily(getOperation(), std::move(patterns));
+(void)applyPatternsAndFoldGreedily(getOperation(), std::move(patterns));
 ...
 context->getDiagEngine().eraseHandler(handlerID);
 ```
@@ -2033,6 +2036,12 @@ memref addr的分配：MemRef的内存分配是由MLIR运行时系统负责的�
 
 ```cpp
 getStridesAndOffset(MemRefType t, SmallVectorImpl<int64_t> &strides, int64_t &offset);
+```
+
+如果使用 `memref.reinterpret_cast` 将 `memref<axbxi64, stride<[s1, s2], offset: off>>` 从 i64 转为 i32，那么输出的 memref 应为
+
+```text
+memref<axbx2xi32, stride<[2 * s1, 2 * s2, 1], offset: 2 * off>>
 ```
 
 ### memrefType
@@ -3353,10 +3362,18 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
 
 11.StringRef
 
-和 ArrayRef 一样，不能被修改，相当于一个const string。 StringRef 其实没有存储在其中数据的所有权，所以想要存储一个 StringRef 往往是不安全的。(因为data的真实memory可能随时被修改)
+StringRef **没有存储在其中数据的所有权** 的 string，可以是 constant 也可以是 dynamic，想要存储一个 StringRef 往往是不安全的。(因为data的真实memory可能随时被修改)
 
-> This class does not own the string data
+但也因为如此， StringRef 十分轻量。
+
+> This class does not own the string data.
 > The start of the string, in an external buffer. `const char *Data = nullptr;`
+
+此外， `StringLiteral` (继承自 StringRef) 也很常见，必须配合 `constexpr` 使用，作为编译器常量，用来表示字符串字面量：
+
+```cpp
+static constexpr StringLiteral xxxAttrName = "............";
+```
 
 ## make_range
 
@@ -4416,10 +4433,10 @@ markAnalysesPreserved<DominanceInfo, PostDominanceInfo>();
 | ValueRange          | ValueRange(ArrayRef<Value>) / ValueRange(ArrayRef<BlockArgument>) |
 |---------------------|-------------------------------------------------------------------|
 | TypeRange           | TypeRange(ArrayRef<Type> types)                                   |
-| ValueTypeRange      | 代表给定value的type                                               |
-| OperandRange        | TypeRange(ArrayRef<Operand> types)                                |
+| ValueTypeRange      | 代表给定value的type                                                 |
+| OperandRange        | TypeRange(ArrayRef<Operand> types)，常当 `ArrayRef<Value>` 使用     |
 | ResultRange         | TypeRange(ArrayRef<OpResult> types)                               |
-| MutableOperandRange | 可以进行修改操作 append / assign / erase                          |
+| MutableOperandRange | 可以进行修改操作 append / assign / erase                             |
 
 ---
 
