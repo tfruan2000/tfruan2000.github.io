@@ -1733,6 +1733,17 @@ static bool isNegatedAffineExpr(AffineExpr candidate, AffineExpr &expr) {
 
 ## Linalg
 
+[Linalg is designed to solve the High-level Hierarchical Optimization](https://mlir.llvm.org/docs/Dialects/Linalg/#rationale)
+
+Linalg IR 比较常见的 transfroms:
+
+- Progressive Buffer Allocation
+- Parametric Tiling
+- Tiled Producer-Consumer Fusion with Parametric Tile-And-Fuse
+- Map to Parallel and Reduction Loops and Hardware
+
+Linalg Dialect 是很重要的一个层级，在这之前的 dialect 更多得是对计算的描述，表达原有的 ML 程序。而从 Linalg 开始，就会经过一系列变换(tile, fuse, promotion, bufferize)贴近目标硬件。
+
 ### op
 
 - linalg.generic

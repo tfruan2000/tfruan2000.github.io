@@ -228,15 +228,51 @@ mix mlir dialect -> llvm dialect -> -> llvm ir -> ptx assembly -> 通过cuda-rt 
 
 # LLM note
 
-QK的相似度计算不用除以模长：长度也是比较重要的信息，一般来说两个词向量的模长表示它们之间的重要性。当然也可以除，后续在softmax时除以一个数来扩大范围，但是这样计算量大了效果不一定有提升
+## attention
+
+1.QK的相似度计算不用除以模长
+
+点积直接表现了向量之间的相似性，在后序softmax计算中，越大的点积就能越突出（越大的权重）。
+
+如果除以模长，就变成了余弦相似度，忽略了向量长度因素的影响。
+
+在self-attention和MHA中，Q和K都是通过变换而来的，保留模长的信息保证了在训练中可以改变变换Q和K的变换参数。
+
+所以处理模长当前只增加了计算复杂度，并未带来显著的收益。
+
+2.除以 $\sqrt{d}$ 得作用
+
+缩放因子用于平衡不同维度的影响，**使得softmax输出更加平滑**，防止输出过于尖锐，导致梯度消失/爆炸。
+
+选择 $\sqrt{d}$ 而不是 $d$ 作为缩放因子，是一种权衡，既保证了点积的值不会太大，也保证了softmax中有一定区分度。
+
+3.softmax激活函数
+
+softmax会将最后的结果归一化，相当于概率分布(落在0～1之间)，全部的结果加起来为1。
+
+这反应的是每个Key对Query的重要性。
+
+其他激活函数不能满足这两点，而且softmax梯度计算简单。
+
+4.mask
+
+attention(decoder) 中的 mask：因为是对初始输入一个个计算，当对token_i进行计算时，需要舍弃掉其后的token，所以需要mask来做舍去的行为(softmax时会认为-inf的部分是0)，**以排除干扰**
+
+5.kvcache
+
+以空间换时间。
+window attn：每个token只和包含本身在内的前n个token做attn（使用前几次decode的kvcache），这样kvcache就可以只存一个window的个数。更早的token信息可以跨层流动，就像cnn中的感受野（输出只跟一些输入有关）
+
+> window attn 是在 Mixtral 中提出的，Mixtral 中Rotary的意思就是：通过某种规则，将Cache中的数据旋转回正确的位置，以便能正确做Attention。因为cache每次都在更新，重新写入，所顺序是不符合期望的。
+
+kv cache存储会造成大量碎片化 -> 使用分页管理(page):将每个序列的键值划分为块，采用非连续的存储分配方案，减少空间浪费
+
+## 推理
 
 推理过程分为prefill和decode，只不过decode是逐个生成token，不能像prefill那样大段prompt做并行。
 prefill：模型理解用户的输入
 decode：模型逐token生成回答
 
-kvcache是以空间换时间
-window attn：每个token只和包含本身在内的前n个token做attn（使用前几次decode的kvcache），这样kvcache就可以只存一个window的个数。更早的token信息可以跨层流动，就像cnn中的感受野（输出只跟一些输入有关）
-
-Mixtral 中Rotary的意思就是：通过某种规则，将Cache中的数据旋转回正确的位置，以便能正确做Attention。因为cache每次都在更新，重新写入，所顺序是不符合期望的。
-
 当前LLM的架构基本都是decoder only，好处是训练效率高：方便并行（特别是流水并行），加大参数量更简单
+
+量化：低位宽数据代替高位宽数据，激活值很难量化（存在异常值，导致量化后精度损失严重，所以量化系统不能全模型统一，按照量化难易程度进行分块）

@@ -41,3 +41,4 @@ _site/
 _local/
 # Ignore the file for test
 /*.txt
+.vscode/

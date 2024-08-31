@@ -6,8 +6,6 @@ categories: [Coding]
 tags: [Coding, Algorithm]
 ---
 
-[2024/08/10 update]再不刷题，秋招咋办！！
-
 # 双指针
 
 ## 反转链表
@@ -521,20 +519,31 @@ bool cmp(int lhs, int rhs) {
 每次挑出一个基准，比基准小的放左边，比基准大的放右边
 
 ```cpp
-void quick_sort(vector<int> &t, int start, int end) {
-  if (start >= end) return;
-  int left = start;
-  int right = end;
-  int base = t[left];
-  while (left < right) {
-    while (left < right && t[right] >= base) --right;
-    t[left] = t[right];
-    while (left < right && t[left] <= base) ++left;
-    t[right] = t[left];
-  }
-  t[left] = base; // 别忘了这个换位
-  quick_sort(t, start, left - 1);
-  quick_sort(t, left + 1, start);
+#include <iostream>
+#include <vector>
+
+void quickSort(std::vector<int>& arr, int left, int right) {
+    if (left >= right) return; // 递归终止条件
+
+    int pivot = arr[left]; // 选择最左边的元素作为基准
+    int i = left + 1;
+    int j = right;
+
+    while (i <= j) {
+        // 从左边找到一个大于基准的元素
+        while (i <= j && arr[i] <= pivot) i++;
+        // 从右边找到一个小于基准的元素
+        while (i <= j && arr[j] >= pivot) j--;
+        // 如果左指针还在右指针的左边，交换它们
+        if (i < j) std::swap(arr[i], arr[j]);
+    }
+
+    // 将基准元素放到正确的位置
+    std::swap(arr[left], arr[j]);
+
+    // 对基准左边和右边的子数组递归排序
+    quickSort(arr, left, j - 1);
+    quickSort(arr, j + 1, right);
 }
 ```
 
@@ -623,32 +632,6 @@ void select_sort(T arr[], const int len){
 }
 ```
 
-```cpp
-vector<int> quick_sort(vector<int>& stock, int cnt, int start, int end) {
-    // 快速排序
-    int l = start, r = end;
-    int base = start;
-    while (l < r) {
-        while (l < r && stock[base] <= stock[r]) r--;
-        while (l < r && stock[base] >= stock[l]) l++;
-        swap(stock[l], stock[r]);
-    }
-    swap(stock[l], stock[base]);
-    // 一直找第cnt的位置
-    if (cnt < l) return quick_sort(stock, cnt, start, l - 1);
-    if (cnt > l) return quick_sort(stock, cnt, l + 1, end);
-    vector<int> ans;
-    ans.assign(stock.begin(), stock.begin() + cnt);
-    return ans;
-}
-vector<int> inventoryManagement(vector<int>& stock, int cnt) {
-    int size = stock.size();
-    if (cnt == 0) return {};
-    if (size == 0 || cnt == size) return stock;
-    return quick_sort(stock, cnt, 0, size - 1);
-}
-```
-
 ## 例题
 
 1. LCR 159. 库存管理 III
@@ -684,7 +667,29 @@ vector<int> inventoryManagement(vector<int>& stock, int cnt) {
 - 快速排序
 
 ```cpp
-
+vector<int> quick_sort(vector<int>& stock, int cnt, int start, int end) {
+    // 快速排序
+    int l = start, r = end;
+    int base = start;
+    while (l < r) {
+        while (l < r && stock[base] <= stock[r]) r--;
+        while (l < r && stock[base] >= stock[l]) l++;
+        swap(stock[l], stock[r]);
+    }
+    swap(stock[l], stock[base]);
+    // 一直找第cnt的位置
+    if (cnt < l) return quick_sort(stock, cnt, start, l - 1);
+    if (cnt > l) return quick_sort(stock, cnt, l + 1, end);
+    vector<int> ans;
+    ans.assign(stock.begin(), stock.begin() + cnt);
+    return ans;
+}
+vector<int> inventoryManagement(vector<int>& stock, int cnt) {
+    int size = stock.size();
+    if (cnt == 0) return {};
+    if (size == 0 || cnt == size) return stock;
+    return quick_sort(stock, cnt, 0, size - 1);
+}
 ```
 
 # 动态规划问题
