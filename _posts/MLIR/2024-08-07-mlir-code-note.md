@@ -2314,6 +2314,8 @@ for (auto &opOperand : op3.getOpOperands()) {
 
 # Interface
 
+Op 相关的 Interface (例如 `DestinationStyleOpInterface`)其实就是一个 Op 的封装。
+
 ## AttrInterface
 
 - ElementsAttrInterface
@@ -4833,7 +4835,14 @@ def FuseIntoContainingOp :
 
 # tensor
 
-tensor 和 memref 是对应的。
+mlir 的框架中主要有两种数据抽象， tensor 和 memref(aka. buffer)，这两者分别对应着 ML 编译器中的高层抽象(torch.tensor)和传统低级编译器的低层抽象 memory buffer。tensor 和 memref 之间通过 bufferization 衔接。Linalg Dialect 中很多 op 的 operand 可以是 tensor 也可以是 memref。
+
+- 相同点：都可以用来表示算子的operand
+- 不同点：
+  - tensor 语义上只能被定值一次，即声明的那一次，和 SSA 的定义有点相似。（SSA IR 要求每个变量只能有一次值域，且使用前需要先定义）
+  - memref 是可变的，可以被多次 def，并且许多 memref 是可能存在 alias 关系，所以在 data flow analysis 中需要考虑 alias analysis。
+  - tensor 上的 rewrite 更简单，因为 tensor 操作都没有 side-effect，而 memref 操作大概率有。
+  - memref 中 ir 的顺序很重要，移动 ir 可能导致程序语义改变，所以 clone 行为要注意。而 tensor 中的 clone 行为一般没问题。
 
 对于 ir-on-memref，我们不能轻易改变 ir 的相对位置，例如以下情况，我们不能将 `%load` 直接拷贝到 `scf.forall` 的body中，因为 `%load` 到 `scf.forall` 之间可能存在对 `%alloc` 的写 `def %alloc`。
 
@@ -4854,9 +4863,6 @@ scf.forall
 %map = linalg.map outs(%1)
 %extract = tensor.extract %1 // c 点
 ```
-
-> tensor 语义中只赋值域一次的行为，和 SSA 的定义有点相似
-> SSA IR 要求每个变量只能有一次值域，且使用前需要先定义
 
 ---
 

@@ -233,7 +233,7 @@ Canonicalize shouldn't lose the semantic of original operation:
 
 6. forall
 
-- grid 显示地表示了 host func
+torch 中的 launch func 显示地作为了 host func，而 grid 则映射到任务应该如何切分。
 
 ```text
 func {
@@ -262,13 +262,19 @@ mlir的codegen更适合访存密集性任务，因为比较好优化不同memory
 对 SIMD 硬件的优化 和 SIMT 硬件的优化
 
 - SIMD
-  - latency bound 优化，越快完成越好
-  - tile(+fuse) 到不同 core 上并行执行，core之间利用smem交换数据；在core内循环展开(最内维)做软流水
+  - latency bound 优化，越快完成越好 -> 保证访存连续性，用连续指令(非strided)
+  - 其他优化：
+    - tile(+fuse) 到不同 core 上并行执行，core之间利用smem交换数据 -> 减少 data move
+    - 在core内循环展开(最内维)做软流水；core之间async -> 减少访存 latency
 - SIMT
-  - throughtput bound 优化，吞吐越大越大
-  - 离散访存优化 memory-coalesce，如何用好 DMA 和 TMA，提升数据传输效率，打满 tensorcore，异步调度 warp。
+  - throughtput bound 优化，吞吐越大越大 -> 用好 DMA 和 TMA，打满 tensorcore
+  - 其他优化：
+    - 离散访存优化 smem 中 memory-coalesce、layout-swlizzed -> 减少访存 latency
+    - 异步调度 warp，通过wrap切换来掩盖访存延迟(其实相当于软流水) -> 减少访存 latency
 
-core 之间 async  <--> warp 之间 async
+> core 之间 async  <--> warp 之间 async
+>
+> 访存优化三板斧：减少数据搬运(用上smem，都写完然后IO出去)，减少数据访存延迟(软流水+减少bank conlict)，保证负载均衡
 
 # LLM note
 

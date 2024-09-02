@@ -510,9 +510,11 @@ dumps the IR before every MLIR pass Triton runs
 ## 打印pass前后ir
 
 - 使用 `triton-opt` 直接跑 pipeline，加上 `mlir-print-ir-after-all`
-- 改 python 中 triton 库 `backend/compiler.py` 中的代码，例如注释掉下面某个pass来看ir是否不同
+- 改 python 中 triton 库 `site-packages/triton/backend/xxx/compiler.py` 中的代码，例如注释掉下面某个pass来看ir是否不同
+
 
 ```python
+    # /usr/lib/python3.10/site-packages/triton/backends/xxx/compiler.py
     def make_ttir(mod, metadata, opt):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
