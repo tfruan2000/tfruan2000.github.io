@@ -14,7 +14,7 @@ kernel写法上请参考 [triton language guide](https://triton-lang.org/main/py
 
 IMO，对 `Triton Kernel` 的优化过程可以简单分为以下两种(因为我目前只会这两步)，本文只涉及第一种：
 
-- 浅层优化：通过替换算子、合并kernel、拆时间片循环等方式实现初步优化。
+- 浅层优化：通过替换算子、合并kernel、拆时间片循环(sequence轴拆分)等方式实现初步优化。
 - 深层优化：分析下降所得IR，使用perf工具，对照算子库实现等方式，优化kernel的下降行为。
 
 ---

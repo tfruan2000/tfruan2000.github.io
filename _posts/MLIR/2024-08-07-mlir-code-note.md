@@ -201,7 +201,7 @@ statement 是 CFG(control flow grap) 中的基本程序块。可以把IR当成st
 
 - program point
 
-program state 是 statement 前后变量的状态。
+program state 是每个 statement(一般是一个ir) 前后(被观察)变量的状态。
 
 数据流分析理论中，每个 program state 都关联了一个 program point 点，如下图，图源[南大软件分析课程](https://www.bilibili.com/video/BV1oE411K79d/?vd_source=29858f685ca867d754c4c0b13af98cb4)。
 
@@ -211,13 +211,13 @@ ProgramPoint 是 DataFlowAnalysis 中的基石，每次分析都是从一个 poi
 
 - data flow values
 
-静态分析完成标志：给每个program point都关联一个值（data flow values），这个值表示这个program state在那个点所有可能值的抽象
+静态分析完成标志：给每个program point都关联一个值（data flow values），这个值表示这个program state在那个点**所有可能值**的抽象
 
 - fix point
 
 在数据流分析中，用来描述数据数据流中信息的变化和融合的是 SemiLattice 理论。例如，在进行活跃性分析时，使用交半格可以跟踪不同数据流中变量活跃性的最小公共集合。这部分的内容可以参考南大《软件分析》课程的[数据流分析](https://www.bilibili.com/video/BV1oE411K79d/?vd_source=29858f685ca867d754c4c0b13af98cb4)。
 
-fixedpoint 即 所有 program point 都关联一个值(data flow values)，这个值表示 program state 在那个点**所有**可能值的抽象。
+fixedpoint 即 所有 program point 都关联一个值(data flow values)，这个值表示 program state 在那个点**所有可能值**的抽象。
 
 SemiLattice 是用来做两个 program point 的 data flow values 的 交汇(meet)操作（对于集合来说，就是并集/交集）。
 
@@ -5227,8 +5227,8 @@ if (auto intAttr = range.size.dyn_cast<Attribute>()) {
 
 - getDefiningOp： BlockArgument 返回 null
 - getOwner()
-  - OpResult ：返回拥有这个result的Operation
-  - BlockArgument ：返回拥有这个blockarg的Block
+  - OpResult ：返回拥有这个result的Operation。 `getArgNumber`
+  - BlockArgument ：返回拥有这个blockarg的Block。 `getResultNumber`
 
 ```cpp
  	// Try to get a memory effect interface for the parent operation.

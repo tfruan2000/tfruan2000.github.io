@@ -126,7 +126,11 @@ mlir的项目中，头文件的写法都有传统的include guard，用 `ifdef` 
 18.智能指针
 
 ```cpp
+// 头文件中声明
 std::unique_ptr<Pass>
+
+// cpp中定义pass
+std::make_unique<Pass>
 ```
 
 # arch
@@ -139,7 +143,14 @@ std::unique_ptr<Pass>
 
 每个Grid可以最多创建65535个block，每个Block最多512个thread
 
-访问层次上，thread操作register，block操作share memory，grid操作global ram
+访问层次上，thread操作register(local memory)，block操作share memory，grid操作global ram
+
+> 所以 thread 一次只能取一个寄存器的值。
+>
+> 每个 bank 一次只能处理一个访问，当多条 thread 访问的数据处于同一个 bank，则会发生 bank conflict。
+> 访存合并是将多个 transactions 合并成较少的 transactions ，但每个线程还是只访问一个元素数据。
+>
+> 因为一个 warp 中的 thread 在同一时间执行相同的指令。所以访存连续后，可以加大单时间内访问的数量
 
 一个block内的所有thread通过share memory（这个share mem 就是负责该block的L1 Cache）来交换数据。不同block之间的thread是无法通信的
 
@@ -175,6 +186,22 @@ Hopper在L1和L2之间加了SM-2-SM Network，实现SM1可以访问SM2的L1 Cach
 (2)ROB申请空间，以便于(乱序执行时)提交时获得正确的目的地址
 (3)发送总线请求到LLC
 (4)LLC命中则返回，失败则从gdram中找
+
+7. PTX 和 SSAS
+
+ptx 和 sass 的区别在于，一个表示虚拟，一个表示实际。 ptx 指令只定义了指令的功能，而 sass 指令表明了针对不同代架构的底层实现。
+> cubin 是硬件二进制指令。
+
+8.CTA, CGA
+
+cooperative thread array：就是 thread block
+
+cooperative grid array：相当于一组 CTA
+
+9.DMA, TMA
+
+- Direct Memory Access 用于提高数据传输
+- Tensor Memory Accelerator 专门设计用来张量数据的传输
 
 # MLIR
 
@@ -224,7 +251,24 @@ func {
 
 mix mlir dialect -> llvm dialect -> llvm ir -> hardware intrinsics -> hardware assembly
 
+> intrinsic 其实是 LLVM 中一些根据硬件后端预定义的 vairable 和 function。
+
 mix mlir dialect -> llvm dialect -> -> llvm ir -> ptx assembly -> 通过cuda-rt binary 转为 sass ，而不用转为 intrinsics
+
+8.应用场景
+
+mlir的codegen更适合访存密集性任务，因为比较好优化不同memory-space之间的data flow。
+
+对 SIMD 硬件的优化 和 SIMT 硬件的优化
+
+- SIMD
+  - latency bound 优化，越快完成越好
+  - tile(+fuse) 到不同 core 上并行执行，core之间利用smem交换数据；在core内循环展开(最内维)做软流水
+- SIMT
+  - throughtput bound 优化，吞吐越大越大
+  - 离散访存优化 memory-coalesce，如何用好 DMA 和 TMA，提升数据传输效率，打满 tensorcore，异步调度 warp。
+
+core 之间 async  <--> warp 之间 async
 
 # LLM note
 
@@ -252,11 +296,13 @@ softmax会将最后的结果归一化，相当于概率分布(落在0～1之间)
 
 这反应的是每个Key对Query的重要性。
 
-其他激活函数不能满足这两点，而且softmax梯度计算简单。
+其他激活函数不能满足这两点，或者要增加额外的计算，而且softmax梯度计算简单。
 
 4.mask
 
 attention(decoder) 中的 mask：因为是对初始输入一个个计算，当对token_i进行计算时，需要舍弃掉其后的token，所以需要mask来做舍去的行为(softmax时会认为-inf的部分是0)，**以排除干扰**
+
+encoder的设计初衷是给 decoder 提供完整输入序列的 feature 表示。而 decoder 会逐 token 输出，只在乎时间 i 及之前的 token 信息。
 
 5.kvcache
 
@@ -267,12 +313,49 @@ window attn：每个token只和包含本身在内的前n个token做attn（使用
 
 kv cache存储会造成大量碎片化 -> 使用分页管理(page):将每个序列的键值划分为块，采用非连续的存储分配方案，减少空间浪费
 
+6.MQA、GQA、MLA
+
+- MQA：所有 Attention-Head 共享一组 KV Cache
+- GQA：一组 KV Cache 支持一个 Group 的 Q
+- MLA：不再做 QK 的乘积，直接使用投影表示。无法使用RoPE位置编码，而使用ALIBI这种。
+
 ## 推理
 
+1.prefill 和 decode
+
 推理过程分为prefill和decode，只不过decode是逐个生成token，不能像prefill那样大段prompt做并行。
-prefill：模型理解用户的输入
-decode：模型逐token生成回答
+
+- prefill：模型理解用户的输入，需要吃下完整一段数据
+  - 两个目标：生成 Prompt token 时的 KV Cache + 生成首个 token
+  - Q K V 序列长度相同，一般是 计算密集型(计算瓶颈)
+  - 常使用 Flash-Attention 算子优化这方面
+- decode：模型逐token生成回答(续写)
+  - 在原始序列上继续(续写)生成 token
+  - Q 一般远小于 K 和 V，是 访存密集型(访存瓶颈)，每次生成 token 都要去读已经存储的 KV Cache
+  - 常使用 Page-Attention 的技术去优化 KV Cache 的存储。
+
+2.decoder only
 
 当前LLM的架构基本都是decoder only，好处是训练效率高：方便并行（特别是流水并行），加大参数量更简单
 
+3.量化
+
 量化：低位宽数据代替高位宽数据，激活值很难量化（存在异常值，导致量化后精度损失严重，所以量化系统不能全模型统一，按照量化难易程度进行分块）
+
+4.在线推理和离线推理
+
+- 在线推理
+  - 需求：实时请求，高并发
+  - 技术：动态批处理(合理调整batch，连续批处理)，内存优化(kv cache管理)
+  - vLLM
+- 离线推理
+  - 需求：极致性能，单卡内存
+  - 技术：量化、静态批处理
+  - TensorRT-LLM
+
+## optim
+
+1.算子融合
+
+- 训练：减少内存带宽占用。需要考虑梯度因素的印象，所以有些中间结果必须要保存。需要考虑**混合精度训练**等带来的影响。
+- 推理：减少内存读写，提升计算图执行速度。

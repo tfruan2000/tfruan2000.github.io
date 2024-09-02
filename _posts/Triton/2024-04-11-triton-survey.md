@@ -30,17 +30,22 @@ gpu层次结构图如下
 
 > 自 Volta 架构后，SM 中的 smem 和 L1 Cache 就合并成一块 memory block 了。
 > 如此程序员就可以自行配置 smem 的大小，在放存密集且连续的场景下（例如matmul），smem大一些性能更好。但是 smem 和 L1 Cache的总大小是一定的。
+>
 > L1 Cache保留的原因：L1在某些场景下也是必要的，例如以 sparse computing 中；smem是很快会用到的，L1是从dram上取来的，cache是防止低速访存必要的，smem能防止污染cache。
+>
 > Hopper 架构中引入了 SM-to-SM 的高速网络，实现了 SM 之间的 smem 互相访问。这为 Thread Block Cluster 提供了编程支持。
 > Thread Block Cluster 的提出是因为以 thread block 为粒度执行任务阻碍运行效率。需要提供更大粒度的线程组。所以一个 thread block cluster 中包含多个 thread block，其中所有 thread 都可以访问负责该 thread block cluster 计算的 SM 群的 smem，这些 smem 一起称为 distributed smem。
 
 CTA（Cooperative Thread Array）：CTA是一个线程组，由一组线程组成，这些线程可以在GPU上的多个处理器中并行执行。**CTA中的线程可以协同工作，通过共享内存等方式进行通信和协作**。CTA通常是在CUDA编程模型中使用的概念，它是将工作任务划分为较小的线程块以便并行执行的基本单元。
 
-> 其实 CTA 就是 thread block
+> 其实 CTA 就是 thread block。
+> Triton 编程不关心 Block 内的行为， thread 和 warp 的 schedule 由编译器完成。
 
 **一个CTA通常由多个warp组成**。一个CTA的线程数量可以是32的倍数（例如，CTA可以有32、64、96等线程）。CTA内的线程被划分为一组一组的warp，每个warp中的线程同时执行相同的指令。每个warp中的thread若访问的内存区域连续，那么这些访问行为可以被coalesce。
 
 CGA（Cooperative Grid Array）：CGA是一种更高级的概念，它是一组CTA的集合，可以在GPU上协同工作。CGA可以用于更大规模的并行计算，将任务划分为多个CTA进行执行，并且CTA之间可以通过全局内存进行通信和同步。
+
+> triton-lang中有一个关于优化 CGA 中 CTA 行为的[pass](https://github.com/triton-lang/triton/blob/main/include/triton/Dialect/TritonNvidiaGPU/Transforms/Passes.td#L27)
 
 # elements
 
@@ -453,6 +458,8 @@ Distributed encodings have a layout function that is entirely characterized by a
 
 最常见的 layout，包含了配合 AxisInfoAnalysis 分析获得 load 和 store 的访存行为，以用来访存合并。
 
+> 一个 warp 中的所有 thread 在同一时间点只能执行相同的指令，所以需要访问的内存越连续，最后 load/store transactions 的数量就越少。配合 shared layout 来调整数据分布，减少 transactions。
+
 An encoding where each warp owns a contiguous portion of the target tensor. This is typically the kind of data layout **used to promote memory coalescing in LoadInst and StoreInst.**
 
 `#blocked0 = #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [8, 4], warpsPerCTA = [8, 1], order = [1, 0]}>`
@@ -499,3 +506,24 @@ dumps the IR before every MLIR pass Triton runs
 - `TRITON_PRINT_AUTOTUNING=1`
 
 打印每次选择的 config
+
+## 打印pass前后ir
+
+- 使用 `triton-opt` 直接跑 pipeline，加上 `mlir-print-ir-after-all`
+- 改 python 中 triton 库 `backend/compiler.py` 中的代码，例如注释掉下面某个pass来看ir是否不同
+
+```python
+    def make_ttir(mod, metadata, opt):
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+        passes.common.add_inliner(pm)
+        passes.ttir.add_rewrite_tensor_pointer(pm)
+        passes.ttir.add_combine(pm)
+        passes.common.add_canonicalizer(pm)
+        passes.ttir.add_reorder_broadcast(pm)
+        passes.common.add_cse(pm)
+        passes.common.add_licm(pm)
+        passes.common.add_symbol_dce(pm)
+        pm.run(mod)
+        return mod
+```
