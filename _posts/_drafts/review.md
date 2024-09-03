@@ -203,6 +203,18 @@ cooperative grid array：相当于一组 CTA
 - Direct Memory Access 用于提高数据传输
 - Tensor Memory Accelerator 专门设计用来张量数据的传输
 
+10.memory-coalecse
+
+如果一个 warp 需要处理的数据连续时，就可以将多个 thread 的内存访问请求合并成一个或者较少个内存传输请求，而不是每个 thread 单独进行内存访问。
+
+pass 前后都是每条 thread 单独发送自己的内存请求，这些请求被合并后由于 LSU(Load/Store Uint) 发送请求到硬件。
+
+11.layout swizzling
+
+smem 中数据是以 bank 的形式组织的，每个 bank 可以单独处理一个内存访问请求。如果多个内存访问请求都指向同一 bank，则会产生 bank-conflict。
+
+所以需要 layout-swizzling 对数据进行重新排列，确保warp在同一时刻的多个内存访问请求处于不同的 bank。
+
 # MLIR
 
 1. SmallVectorImpl
@@ -262,14 +274,14 @@ mlir的codegen更适合访存密集性任务，因为比较好优化不同memory
 对 SIMD 硬件的优化 和 SIMT 硬件的优化
 
 - SIMD
-  - latency bound 优化，越快完成越好 -> 保证访存连续性，用连续指令(非strided)
+  - latency bound 优化，越快完成越好 -> 保证访存连续性，用连续指令(非strided，非scalar)
   - 其他优化：
     - tile(+fuse) 到不同 core 上并行执行，core之间利用smem交换数据 -> 减少 data move
     - 在core内循环展开(最内维)做软流水；core之间async -> 减少访存 latency
 - SIMT
   - throughtput bound 优化，吞吐越大越大 -> 用好 DMA 和 TMA，打满 tensorcore
   - 其他优化：
-    - 离散访存优化 smem 中 memory-coalesce、layout-swlizzed -> 减少访存 latency
+    - 离散访存优化 smem 中 memory-coalesce（warp内的thread在同一时刻执行的指令是相同的，所以要减少指令的下发）、layout-swlizzed -> 减少访存 latency
     - 异步调度 warp，通过wrap切换来掩盖访存延迟(其实相当于软流水) -> 减少访存 latency
 
 > core 之间 async  <--> warp 之间 async
