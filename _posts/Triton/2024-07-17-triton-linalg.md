@@ -190,6 +190,7 @@ ctrl + p 输入 clangd，先点击 下载language server；然后 加 settings.j
 
 ```bash
 export PATH=xxx/triton-linalg/triton/python/build/{current_cmake_version}/third_party/triton_linalg/bin:$PATH
+# triton-opt 在 xxx/triton-linalg/triton/python/build/{current_cmake_version}/bin
 ```
 
 ## 打印ir的方法
@@ -1555,6 +1556,10 @@ lib/Dialect/Triton/Interfaces/InferAxisInfoInterface.cpp
 - strideValue: 维度i上，两个相邻连续元素的差值为 `strideValue[i]`。对应着 `tl.multiple_of(input, values)` 的 `values`.
 - constantValue：该 lattice 中的 constant value
 
+> divisibilty 代表指针指向的地址能被其整除。例如 `!tt.ptr<f32>` 类型的指针的 divisibilty = 16.
+>
+> stride 对应官方 AxisInfoAnalysis 中的 Contiguity。
+
 以下面两种数据为例
 
 ```bash
@@ -1595,7 +1600,7 @@ if (Attribute attr = op->getAttr("tt.constancy")) {
 }
 ```
 
-传递时，例如传递的时候某个op的producder的contiguity分别等于[64, 1]和[64, 64]，那么合并后也是[64,1]
+传递时，例如传递的时候某个op的producder的contiguity分别等于[64, 1]和[64, 64]，那么合并(求最小公倍数)后也是[64,1]
 
 整个传递算法是基于MLIR官方提供的数据流分析算法，通过定义每个算子的转移函数，进而推导出全图的连续性信息。
 

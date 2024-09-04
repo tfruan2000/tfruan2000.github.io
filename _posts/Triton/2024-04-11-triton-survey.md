@@ -475,6 +475,18 @@ An encoding where each warp owns a contiguous portion of the target tensor. This
 
 该BLock访存模式一次能处理(1x8x8, 8x4) = (64, 32)规模的shape。但若输入op的shape为(128, 32)，那么让每个thread处理两个连续块即可，即第一个thread处理(0, 0:7), (64, 0:7)两个块
 
+假如一个 warp 希望访问 128 个数，32 个 thread 可以通过四次搬运完成：
+
+```text
+#blocked_before = #triton_gpu.blocked<{sizePerThread = [1, 1], threadsPerWarp = [32, 1], warpsPerCTA = [4, 1], order = [0, 1]}>
+```
+
+memory-coalesce 后将会生成下面的 Layout(第二维连续更长，所以order也要跟着改变)，这样每个 thread 处理的数据更多，更能在后端映射成 vectorization 指令。
+
+```text
+#blocked_after = #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [2, 16], warpsPerCTA = [4, 1], order = [1, 0]}>
+```
+
 ### shared layout
 
 In order to **avoid shared memory bank conflicts**, elements may be **swizzled** in memory.

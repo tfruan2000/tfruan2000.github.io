@@ -215,6 +215,8 @@ smem 中数据是以 bank 的形式组织的，每个 bank 可以单独处理一
 
 所以需要 layout-swizzling 对数据进行重新排列，确保warp在同一时刻的多个内存访问请求处于不同的 bank。
 
+layout-swizzling 是通过软件算法改变地址映射关系，使得内存访存模式和物理存储布局更匹配。 logic layout -> swizzle mapping  -> physical layout
+
 # MLIR
 
 1. SmallVectorImpl
@@ -269,9 +271,13 @@ mix mlir dialect -> llvm dialect -> -> llvm ir -> ptx assembly -> 通过cuda-rt 
 
 8.应用场景
 
-mlir的codegen更适合访存密集性任务，因为比较好优化不同memory-space之间的data flow。
+mlir的codegen更适合**访存密集性**任务。
 
-对 SIMD 硬件的优化 和 SIMT 硬件的优化
+因为 mlir 中的任务调度和软流水一般在 hardware dialect 做，接近直接操纵汇编，所以指令排布的自由度比较大。而软件流水本就是为了掩盖访存延迟。
+
+软件流水是从最内层展开的，将IO、mv(片上访存)、计算指令根据依赖排开。
+
+9.对 SIMD 硬件的优化 和 SIMT 硬件的优化
 
 - SIMD
   - latency bound 优化，越快完成越好 -> 保证访存连续性，用连续指令(非strided，非scalar)

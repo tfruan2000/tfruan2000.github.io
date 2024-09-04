@@ -2042,6 +2042,8 @@ rewriter.create<tensor::ParallelInsertSliceOp>(
 
 ## MemRef
 
+> 更详细介绍见后文 `tensor` 章节，说明了 MLIR 中 tensor 和 memref 的关系
+
 %a = memref.view/subview %b：a相当于是b的别名，二者具有相同的baseptr，指向同一块内存，修改b/a时，也会影响a/b。
 
 getMixedOffsets / getMixedSizes / getMixedStrides → SmallVector<OpFoldResult>
@@ -2058,9 +2060,16 @@ getStridesAndOffset(MemRefType t, SmallVectorImpl<int64_t> &strides, int64_t &of
 memref<axbx2xi32, stride<[2 * s1, 2 * s2, 1], offset: 2 * off>>
 ```
 
+memref  在组织上可以视为一维数组，判断其连续性时需要从最内维(innermost)开始判断。
+需要满足 stride[rank - 1] == 1, 并且 stride[i + 1] * shape[i + 1] = shape[i] (0 <= i < rank)。
+
+那如果行主序的存储模式是从最低维开始判断memref的连续性，那列主序的存储模式是从最高维开始吗？
+
+-> 并不是的，行主序和列主序是内存中数据的组织模式，并不影响 memref 表达的形式，所以列主序也是一样从最内维开始判断的。最终硬件会负责解释这个memref。如果内存中数据排布是以行为主序的，那么列主序数据存储后在硬件中会有类似 transpose 的行为将其转为硬件组织数据的模式。
+
 ### memrefType
 
-layout, offset, stride, memrefspace
+MemRefType 主要由 layout 描述: offset, size, stride, memrefspace
 
 - getElementType() → Type
 - getShape() → ArrayRef<int64_t>
