@@ -108,7 +108,7 @@ tags: [Triton, Linalg]
 
 - triton-shared: 指针转为 `memref<*xf32>` -> 通过`pointer analysis`计算出 `strides,shapes,offset`，使用 `memref.reinterpret_cast` 将memref<*xf32>转成数据实际存放的memref -> 通过 `memref.copy + bufferization.to_tensor` 转成tensor语义下的操作
 
-- triton-linalg: 指针会使用`llvm.inttoptr`  转为 `llvm.ptr` (和 `triton` [官方一致](https://github.com/triton-lang/triton/blob/main/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L792))-> 通过`AxisInfoAnalysis`计算出 `strides,shapes,offset`，使用 `aux.view` 将`llvm.ptr`转成数据实际存放的memref -> 通过 `bufferization.to_tensor` 转为tensor语义下的操作，再使用 `linalg.copy`(连续访存) 或 `linalg_ext.gather`(离散访存) 来获取数据
+- triton-linalg: 指针会使用`llvm.inttoptr`  转为 `llvm.ptr` (和 `triton` [官方一致](https://github.com/triton-lang/triton/blob/main/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L792))-> 通过`AxisInfoAnalysis`计算出 `strides,shapes,offset`(实际是分析出访存的连续性)，使用 `aux.view` 将`llvm.ptr`转成数据实际存放的memref -> 通过 `bufferization.to_tensor` 转为tensor语义下的操作，再使用 `linalg.copy`(连续访存) 或 `linalg_ext.gather`(离散访存) 来获取数据
 
 # 环境配置
 
@@ -1898,7 +1898,7 @@ arith.constant dense<0.0> : tensor<axf32>
 > PointerType 的一些形式：
 >
 > - !tt.ptr<f32>
-> - !tt.ptr<tensor<2xf32>>  这就是 TensorPointerType
+> - !tt.ptr<tensor<2xf32>>  这就是 TensorPointerType， `tl.make_block_ptr` 最后会专政这个
 > - !tt.ptr<!tt.ptr<f32>>
 > PointerType 的 getPointeeType 方法会获得 PointerType 内的类型。上面三个分别获得 f32, tensor<2xf32>, !tt.ptr<f32>
 {: .prompt-info }

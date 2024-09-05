@@ -140,9 +140,7 @@ find path/to/your/project -name '*.cpp' -o -name '*.h' | xargs clang-format -i
 
 2.ConversionPattern和RewritePatter的区别
 
-- ConversionPattern常配合 **applyFullConversion/** 使用，用于dialect2dialect的op之间变换
-
-> applyFullConversion: 尽可能尝试变换，直达IR符合ConversionTarget的合法性，pattern必须成功，不然会报错。
+- ConversionPattern常配合 **applyFullConversion/applyPartialConversion** 使用，用于dialect2dialect的op之间变换
 
 - RewritePattern一般用于优化变换，常配合 **applyPatternsAndFoldGreedily** 使用
 
@@ -661,6 +659,8 @@ mlir/lib/IR/Builders.cpp
 ## OpBuilder
 
 OpBuilder 继承自 Builder 类，**额外提供了struct Listener和class InsertPoint**
+
+> `ImplicitLocOpBuilder` 继承自 OpBuilder，并不需要 Location 信息。
 
 ### InsertPoint
 
@@ -1741,7 +1741,6 @@ Linalg IR 比较常见的 transfroms:
 
 - Progressive Buffer Allocation
 - Parametric Tiling
-- Promotion to Temporary Buffer in Fast Memory
 - Tiled Producer-Consumer Fusion with Parametric Tile-And-Fuse
 - Map to Parallel and Reduction Loops and Hardware
 
@@ -3244,9 +3243,9 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
 3.llvm::SmallVectorImpl
 
 - SmallVector构造时调用的是 `SmallVector() : SmallVectorImpl<T>(N) {}`
-- SmallVectorImpl 是 SmallVector 的一个基类，不包含具体的栈上预留空间。通过使用 SmallVectorImpl 作为形参，函数可以处理不同容量的 SmallVector，而不需要关心 SmallVector 的栈上预留空间的具体大小。
+- 写一个以SmallVector为参数的函数，如果传入的元素个数是固定的，建议使用`SmallVectorImpl` 作为形参，来避免**对堆栈元素的隐式数量进行硬编码**
 
-> `SmallVector` 有一个参数 `N`表示该栈开辟了多少空间(元素)，函数上直接使用 `SmallVectorImpl`作形参能减少拷贝。 `SmallVectorImpl<Value> &`
+> `SmallVector` 有一个参数 `N`表示该堆栈开辟了多少空间(元素)，函数上直接使用 `SmallVectorImpl`作形参能减少拷贝。 `SmallVectorImpl<Value> &`
 
 4.llvm::SetVector
 
@@ -3387,7 +3386,7 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
 
 11.StringRef
 
-StringRef **没有存储在其中数据的所有权** 的 string，不能改变其 Data 指针指向的区域的值，但是可以改变 Data 指针的指向。想要存储一个 StringRef 往往是不安全的。(因为data的真实memory可能随时被修改)
+StringRef **没有存储在其中数据的所有权** 的 string，可以是 constant 也可以是 dynamic，想要存储一个 StringRef 往往是不安全的。(因为data的真实memory可能随时被修改)
 
 但也因为如此， StringRef 十分轻量。
 
@@ -4847,14 +4846,14 @@ def FuseIntoContainingOp :
 
 # tensor
 
-mlir 的框架中主要有两种数据抽象， tensor 和 memref(aka. buffer)，这两者分别对应着 ML 编译器中的高层抽象(torch.tensor)和传统低级编译器的低层抽象 memory buffer。tensor 通过 bufferization 转为 memref 表示，一些 dialect 中 operand 可以是 tensor 也可以是 memref，例如 linalg(tensor + linalg-on-tensor --bufferization--> memref + linalg-on-memref)。
+mlir 的框架中主要有两种数据抽象， tensor 和 memref(aka. buffer)，这两者分别对应着 ML 编译器中的高层抽象(torch.tensor)和传统低级编译器的低层抽象 memory buffer。tensor 和 memref 之间通过 bufferization 衔接。Linalg Dialect 中很多 op 的 operand 可以是 tensor 也可以是 memref。
 
 - 相同点：都可以用来表示算子的operand
 - 不同点：
   - tensor 语义上只能被定值一次，即声明的那一次，和 SSA 的定义有点相似。（SSA IR 要求每个变量只能有一次值域，且使用前需要先定义）
   - memref 是可变的，可以被多次 def，并且许多 memref 是可能存在 alias 关系，所以在 data flow analysis 中需要考虑 alias analysis。
   - tensor 上的 rewrite 更简单，因为 tensor 操作都没有 side-effect，而 memref 操作大概率有。
-  - memref 中 ir 的顺序很重要，移动 ir 很可能导致程序语义改变，所以 clone 行为要注意。而 tensor 中的 clone 行为一般没问题。
+  - memref 中 ir 的顺序很重要，移动 ir 可能导致程序语义改变，所以 clone 行为要注意。而 tensor 中的 clone 行为一般没问题。
 
 对于 ir-on-memref，我们不能轻易改变 ir 的相对位置，例如以下情况，我们不能将 `%load` 直接拷贝到 `scf.forall` 的body中，因为 `%load` 到 `scf.forall` 之间可能存在对 `%alloc` 的写 `def %alloc`。
 
@@ -5295,6 +5294,16 @@ WalkResult ret = a.walk([&](Ty opOfTy) -> WalkResult {
 - `WalkOrder` : 可以设置 walk 的方向， `PreOrder` 或  `PostOrder`，不设置时默认 `PreOrder`
 
 - `wasInterrupted()` ,  `wasSkipped()` 判断 walk 的结果(返回值)
+
+---
+
+# MLIR CodeGen
+
+mix mlir dialect -> llvm dialect -> llvm ir -> hardware intrinsics -> hardware assembly
+
+> intrinsic 其实是 LLVM 中一些根据硬件后端预定义的 vairable 和 function。
+
+mix mlir dialect -> llvm dialect -> llvm ir -> ptx assembly -> 通过cuda-rt binary 转为 sass ，而不用转为 intrinsics
 
 ---
 
