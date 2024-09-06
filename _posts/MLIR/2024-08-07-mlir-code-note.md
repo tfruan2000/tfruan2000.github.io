@@ -761,7 +761,7 @@ for (OpOperand *opOperand : mapOp.getOpOperandsMatchingBBargs()) {
 assert(mapOpBbargs.size() == bbArgs.size());
 IRMapping bvm;
 for (auto [bbarg, newBBarg] : llvm::zip(bbArgs, mapOpBbargs)) {
-  bvm.map(bbarg, newBBarg);
+  bvm.map(bbarg, newBBarg); // 这个操作其实就是在 DenseMap<Value, Value> 中建立映射关系。
 }
 rewriter.setInsertionPointToStart(mapOpBody);
 for (Operation &operation : *reduceOpBody) {
@@ -2299,9 +2299,12 @@ mlir/include/mlir/IR/IRMapping.h
 
 用法：
 
-1.构造
+1.构造(建立映射关系)
 
 - map(Value from, Value to)
+  - 在使用 old region 创建新的 region 常用，尤其是 region 上存在 bbarg 且 数量该变了，需要重新建立 bbarg 和 region 内部计算的映射关系
+  - `bv.map(oldArg, newArg)`，注意 `oldArg` 和 `newArg` 之间是否存在计算变换关系
+  - 然后 builder.clone(op, bvm) for op in region 即可
 - map(Block *from, Block *to)
 - map(Operation *from, Operation *to)
 

@@ -1558,7 +1558,7 @@ lib/Dialect/Triton/Interfaces/InferAxisInfoInterface.cpp
 
 > divisibilty 代表指针指向的地址能被其整除。例如 `!tt.ptr<f32>` 类型的指针的 divisibilty = 16.
 >
-> stride 对应官方 AxisInfoAnalysis 中的 Contiguity。
+> triton 官方的 AxisInfoAnalysis 会记录三个信息: divisbilty, contiguity, constancy，其中 contiguity 和 上文的 stride 是一个意思
 
 以下面两种数据为例
 

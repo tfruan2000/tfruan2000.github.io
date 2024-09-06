@@ -1,3 +1,11 @@
+---
+title: LLM Inference Optimization
+author: tfruan
+date: 2024-09-06 12:00:00 +0800
+categories: [MLSys]
+tags: [MLSys, LLM, Optimization]
+---
+
 # LLM Basic Note
 
 ## attention
@@ -102,6 +110,7 @@ kv cache存储会造成大量碎片化 -> 使用分页管理(page):将每个序�
 > core 之间 async  <--> warp 之间 async
 >
 > 访存优化三板斧：减少数据搬运(用上smem，都写完然后IO出去)，减少数据访存延迟(软流水+减少bank conlict)，保证负载均衡
+{: .prompt-info }
 
 ## Operation Fuse
 

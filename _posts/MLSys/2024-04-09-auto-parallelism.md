@@ -2,8 +2,8 @@
 title: AI Compiler 中的Auto-Parallelism
 author: tfruan
 date: 2024-04-09 20:00:00 +0800
-categories: [AI Compiler]
-tags: [AI Compiler, Auto Parallelism]
+categories: [MLSys]
+tags: [MLSys, Auto Parallelism]
 ---
 
 AI编译器可以涉及的两种切图：

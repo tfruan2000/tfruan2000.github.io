@@ -2,8 +2,8 @@
 title: AI Compiler 中的计算图切分
 author: tfruan
 date: 2024-04-12 20:00:00 +0800
-categories: [AI Compiler]
-tags: [AI Compiler, Graph Partition]
+categories: [MLSys]
+tags: [MLSys, Graph Partition]
 ---
 
 在 Auto-Parallelism 一文中讲到了ai compiler可能涉及的两种切图算法：
