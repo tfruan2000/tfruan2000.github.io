@@ -2347,7 +2347,8 @@ Op 相关的 Interface (例如 `DestinationStyleOpInterface`)其实就是一个 
 为自定义的Dialect继承该interface以实现inliner的操作，然后在额外重载一点函数就行，例如 `isLegalToInline`
 
 ```cpp
-struct AffineInlinerInterface : public DialectInlinerInterface {
+// mlir/lib/Dialect/SCF/IR/SCF.cpp
+struct SCFInlinerInterface : public DialectInlinerInterface {
   using DialectInlinerInterface::DialectInlinerInterface;
 ```
 
@@ -2358,9 +2359,20 @@ bool InlinerInterface::isLegalToInline(Operation *op, Region *dest,
                                        bool wouldBeCloned,
                                        IRMapping &valueMapping) const {
   if (auto *handler = getInterfaceFor(op))
-    return handler->isLegalToInline(op, dest, wouldBeCloned, valueMapping);
+    return handler->isLegalToInline(op, dest, wouldBeCloned, valueMapping); // 跳转到对应 dialect 中去
   return false;
 }
+```
+
+每个 dialect 继承 DialectInlinerInterface 后，根据需求重写 部分虚函数 (如`isLegalToInline`)
+
+```cpp
+struct SCFInlinerInterface : public DialectInlinerInterface {
+  using DialectInlinerInterface::DialectInlinerInterface;
+  bool isLegalToInline(Region *dest, Region *src, bool wouldBeCloned,
+                       IRMapping &valueMapping) const final {
+  bool isLegalToInline(Operation *, Region *, bool, IRMapping &) const final {
+  void handleTerminator(Operation *op, ValueRange valuesToRepl) const final {
 ```
 
 ## DestinationStyleOpInterface
@@ -4135,8 +4147,9 @@ static Operation *tileOpImpl(PDLResultList &results, Value value) {
 
 void registerRuleFunctions(RewritePatternSet &patterns) {
   auto &patternModule = patterns.getPDLPatterns();
+  // 这些 pattern 的实现见后文
   patternModule.registerRewriteFunction("tileOp", tileOpImpl);
-  patternModule.registerRewriteFunction("tilingLoopSizeLimit", tilingLoopSizeLimitImpl);
+  patternModle.registerConstraintFunction("tilingLoopSizeLimit", tilingLoopSizeLimitImpl)
   ...
 }
 ```
@@ -4144,6 +4157,45 @@ void registerRuleFunctions(RewritePatternSet &patterns) {
 ## rewrite pattern impl
 
 ```cpp
+// help func
+static FailureOr<Value> getLastMatchOpAndSetRewriter(
+    PatternRewriter &rewriter, Operation *op) {
+  if (auto moduleOp = op->getParentOfType<ModuleOp>()) {
+    Block &block1 = moduleOp.getRegion().front();
+    transform::SequenceOp lastSeq;
+    auto iter = block1.rbegin();
+    while (iter != block1.rend()) {
+      if (auto seq = dyn_cast_if_present<transform::SequenceOp>(*iter)) {
+        lastSeq = seq;
+        break;
+      }
+      ++iter;
+    }
+    if (lastSeq) {
+      Block &block2 = lastSeq.getRegion().front();
+      iter = block2.rbegin();
+      transform::MatchOp lastMatch;
+      while (iter != block2.rend()) {
+        if (auto match = dyn_cast_if_present<transform::MatchOp>(*iter)) {
+          lastMatch = match;
+          break;
+        }
+        ++iter;
+      }
+      if (lastMatch) {
+        rewriter.setInsertionPointAfter(lastMatch);
+        return lastMatch.getResult();
+      }
+    }
+  }
+  return failure();
+}
+
+static Value getTargetHandle(PatternRewriter &rewriter, value &handle,
+                             Operation *op) {
+  return rewriter.create<transform::MatchOp>(...)
+}
+
 //===----------------------------------------------------------------------===//
 // rewrite methods
 //===----------------------------------------------------------------------===//
@@ -4152,15 +4204,16 @@ static void tileOpImpl(PatternRewriter &rewriter, Operation *op,
                        ArrayAttr tileSize) {
   DBGS() << "Enter rewrite rule [tileOp], with target op: ";
   LLVM_DEBUG(op->print(DBGS()));
-  Value funcHandle = getFuncHandleAndSetRewriter(rewriter, op); // 先找到对func matchop
+  auto handle = getLastMatchOpSetRewriter(rewriter, op); // 当前 transform sequence 中最后一个 matchOp
+  if (failed(handle)) return;
   MLIRContext *context = op->getContext();
   auto pdlOpType = pdl::OperationType::get(context);
-  Value anchor = getAnchorHandle(rewriter, funcHandle, op); // 生成对target的match op
+  Value target = getTargetHandle(rewriter, *handle, op); // 生成对target的match op
   tileSize = tileSize.empty() ? nullptr : tileSize;
   rewriter.create<transform::TileToForallOp>(
       rewriter.getUnknownLoc(),
       /*resultTypes=*/TypeRange({pdlOpType, pdlOpType}),
-      /*target=*/anchor,
+      /*target=*/target,
       /*tile_sizes=*/tileSize,);
 }
 
@@ -4472,9 +4525,53 @@ markAnalysesPreserved<DominanceInfo, PostDominanceInfo>();
 ```cpp
 mlir/include/mlir/IR/SymbolTable.h
 mlir/lib/SymbolTable.cpp
+mlir/docs/SymbolsAndSymbolTables.md
 ```
 
-使用**SymbolTable trait**来表示Operation的特征表
+## Symbol
+
+Symbol 提供了一种非 SSA 机制(SSA机制采用值引用的方法)的引用方法，通过名称引用。SSA 类的值引用生命周期管理比较复杂。
+
+换言之，可以把 Symbol 理解为一种带有名称的操作，例如 func 和 module 上挂的名字，而 SymbolTable 负责记录，其中的所有 Symbol 名称唯一。SymbolTable 能够通过作用域的隔离性，保证多线程环境下的安全性。作为 Symbol 的类必须实现 `SymbolOpInterface`。
+
+> 例如 `func.call` op 的`SymbolTable` 中存在其使用的 `func.func` 对象名称(func.func的名字确实不能重复)。
+
+使用 Symbol 的方式访问 global value or vairable，可以实现 **multi-threaded compilation without this locking**。
+
+(1) SSA 访问
+
+这样会导致 foo 就不能 `IsolatedFromAbove`，依赖于 `%a`，且可能影响 `%a`，所以为了线程安全性，就需要加锁。
+
+```text
+%a = global xxx
+foo {
+  use %a
+}
+```
+
+(2) Symbol 访问
+
+`foo` 内的操作以 Symbol 的形式使用了全局变量，不能对其进行修改。所以 `foo` 内依旧保持 `IsolatedFromAbove`。
+
+```text
+global "a"
+foo {
+  use "a"
+}
+```
+
+嵌套访问的形式也很常见，Symbol 的形式访问并不会影响访问的内容。
+
+```text
+module @module_symbol {
+  // This `func.func` operation defines a symbol named `nested_symbol`.
+  func.func @nested_symbol()
+}
+
+// Our `foo.user` operation may refer to the nested symbol, by resolving through
+// the parent.
+"foo.user"() {uses = [@module_symbol::@nested_symbol]} : () -> ()
+```
 
 在 op 的 liveness 相关计算中常见到
 
@@ -4482,7 +4579,13 @@ mlir/lib/SymbolTable.cpp
 mlir/lib/Analysis/DataFlow/DeadCodeAnalysis.cpp
 ```
 
-## SymbolTable用法：
+## SymbolTable用法
+
+SymBolTable 继承自 `TraitBase`，用来给 region operation 提供 symbol table 信息的。即**定义 `SymbolTable` 的 op 必须继承 `OpTrait::SymbolTable`**。
+
+一般 func 这里 op 都继承了 `SymbolOpInterface`。
+
+SymbolDCE pass 应该在有 `OpTrait::SymbolTable` operation 的开始运行。
 
 - 构建: SymbolTable(Operation *symbolTableOp)
 - getSymbolAttrName { return "sym_name"; }

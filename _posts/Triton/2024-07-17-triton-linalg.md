@@ -1898,7 +1898,7 @@ arith.constant dense<0.0> : tensor<axf32>
 > PointerType 的一些形式：
 >
 > - !tt.ptr<f32>
-> - !tt.ptr<tensor<2xf32>>  这就是 TensorPointerType， `tl.make_block_ptr` 最后会专政这个
+> - !tt.ptr<tensor<2xf32>>  这就是 TensorPointerType， `tl.make_block_ptr` 最后会转成这个
 > - !tt.ptr<!tt.ptr<f32>>
 > PointerType 的 getPointeeType 方法会获得 PointerType 内的类型。上面三个分别获得 f32, tensor<2xf32>, !tt.ptr<f32>
 {: .prompt-info }

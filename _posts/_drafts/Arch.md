@@ -36,15 +36,19 @@ cooperative thread array：就是 thread block
 
 cooperative grid array：它是一组CTA的集合，可以在GPU上协同工作。CGA可以用于更大规模的并行计算，将任务划分为多个CTA进行执行，并且CTA之间可以通过全局内存进行通信和同步。
 
-4.SM是负责完成 block 计算任务的执行单元
+4.warp
 
-把一个个block分配给SM进行运算；而block中的thread又会以warp（线程束）为单位，对thread进行分组计算。目前CUDA的warp大小都是32，也就是说32个thread会被组成一个warp来一起执行。同一个warp中的thread执行的指令是相同的，只是处理的数据不同
+block中的thread又会以warp（线程束）为单位，对thread进行分组组织。
 
-基本上warp 分组的动作是由SM 自动进行的，会以连续的方式来做分组。比如说如果有一个block 里有128 个thread 的话，就会被分成四组warp，第0-31 个thread 会是warp 1、32-63 是warp 2、64-95是warp 3、96-127 是warp 4。而如果block 里面的thread 数量不是32 的倍数，那他会把剩下的thread独立成一个warp
+warp大小当前一般是32。比如说如果有一个block 里有128 个thread 的话，就会被分成四组warp，第0-31 个thread 会是warp 1、32-63 是warp 2、64-95是warp 3、96-127 是warp 4。而如果block 里面的thread 数量不是32 的倍数，那他会把剩下的thread独立成一个warp。
+
+warp 内的 thread 在同一时间执行相同的指令，逻辑上和 SIMD 相似。
+
+> SM是负责完成 block 计算任务的执行单元。warp 分组的动作是由 SM 自动进行的。
 
 对于计算密集型kernel，4-warp配置通常是最常用/首选的。8-warp配置可能会在prologue或epilogue阶段引入一些延迟。对于非常小的GEMM问题，可以尝试2-warp或1-warp配置。
 
-一个SM 可以处理多个线程块block，当其中有block 的所有thread 都处理完后，他就会再去找其他还没处理的block 来处理。
+一个SM 可以同时处理多个线程块block，当其中有block 的所有thread 都处理完后，他就会再去找其他还没处理的block 来处理。
 
 5.thread block cluster
 
@@ -64,6 +68,12 @@ smem和SM的L1Cache共用一块物理空间，但Cache是不可见的，而smem�
 
 ![sm](/assets/img/blog/img_triton_survey/gpu_arch.png)
 
+- INTU 整数计算单元
+- FPU 单精度浮点计算单元
+- DPU 双精度浮点计算单元
+- SFU 特殊functio单元
+- LDST load-store单元
+
 每个 SM 都有独立的 smem, constant cache, register mem，SM之间共享 L2 Cache 和 gdram。 SM(流式多处理器) 中的处理单位称为 SP(流示处理器)。
 
 自 Volta 架构后，SM 中的 smem 和 L1 Cache 就合并成一块 memory block 了。
@@ -78,11 +88,11 @@ Thread Block Cluster 的提出是因为以 thread block 为粒度执行任务阻
 
 2.warp scheduler
 
-SM 中可以通过切换 warp 来掩盖访存开销(在访存时换另一个warp上)，来减少 stall 时间。
+每个 warp 会被分配到一个 warp scheduler 上，warp scheduler 可以在不同的 warp 之间切换。当某个 warp stall 时，可以通过切换 warp 来掩盖访存开销(在访存时换另一个warp上)，来减少 stall 时间。
 
-在 SM 中控制 warp 切换的单元叫 warp scheduler。每个 warp 会被分配给一个 warp scheduler，warp scheduler 控制 warp 切换没有开销。
+比如 Ampere 4 个 warp scheduler，所以 thread block 一般线程数不会少于 128 个，256 个比较常用，因为可以切换 warp 来减少 stall 的时间。
 
-比如 Ampere 4 个 warp scheduler，所以 thread block 一般线程数不会少于 128 个，256 个比较常用，因为可以切换 warp 来减少 stall 的时间
+每个 warp scheduler 🈶两个 instruction dispatch，每个 cycle 都可以向当前处于其上的 warp 发送两条指令。
 
 ## memory unit
 
