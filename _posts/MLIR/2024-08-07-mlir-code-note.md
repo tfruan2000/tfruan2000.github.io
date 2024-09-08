@@ -142,6 +142,12 @@ find path/to/your/project -name '*.cpp' -o -name '*.h' | xargs clang-format -i
 
 - ConversionPattern常配合 **applyFullConversion/applyPartialConversion** 使用，用于dialect2dialect的op之间变换
 
+CoversionPattern 可能需要运行多遍直到 legal，过程中可能存在非法的 ir，所以推荐从 adaptor 中去取 operand 的信息。
+
+> You are supposed to lookup operands in the adaptor during a dialect conversion. [来自](https://github.com/llvm/llvm-project/pull/107221)。
+
+但 RewritePattern 通常需要一遍完成，所以不能用在 dialect-to-dialect 的 conversion 中。
+
 - RewritePattern一般用于优化变换，常配合 **applyPatternsAndFoldGreedily** 使用
 
 ```cpp
