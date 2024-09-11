@@ -2012,9 +2012,12 @@ rewriter.create<tensor::CollapseShapeOp>(loc, collapseType, collapseIn, collapse
 
 创建 `scf.forall` 时，如果有 output，就需要使用 `tensor.parallel_insert_slice` 来返回
 
+- forallOp.getTerminator() -> 返回 `scf.forall_in_parallel`
+- forallOp.getTerminator().getYieldingOps() -> 返回 `scf.forall_in_parallel` 内的 `tensor.parallel_insert_slice`
+
 ```cpp
 // forallOp.getTerminator() 返回的是 scf.forall.in_parallel op
-rewriter.setInsertPointToTheEnd(forallOp.getTerminator().getBody);
+rewriter.setInsertPointToTheEnd(forallOp.getTerminator().getBody());
 // 如果 forall 循环只进行一次(即 ub - lb = 1)，那么返回的行为就和 scf.forall 的 inductionVar 无关
 auto zero = rewriter.getIndexAttr(0);
 auto one = rewriter.getIndexAttr(1);
@@ -5033,7 +5036,7 @@ scf.forall
 
 (4) `CHECK-NEXT` : 检查紧挨上一个ir的ir
 
-(5) `CHECK-DAG` : 不考虑检查的顺序
+(5) `CHECK-DAG` : 不考虑检查的顺序，对于 `arith.constant` 这样的，最好这么用 `CHECK-DAG` 检查，因为 llvm 版本更新后 constant 生成的位置可能改变。
 
 - 测试方法
 
@@ -5054,6 +5057,12 @@ build/bin/llvm-lit mlir/test/Dialect/Linalg/decompose-ops.mlir -a
 // CHECK:   %[[ALLOC1:.*]] = memref.alloc() : () -> memref<32xf32>
 // CHECK:   vector.xxx %[[ALLOC1]], %[[VAL1]], []) : (memref<32xf32>, memref<32xf32>) -> ()
 // CHECK:   cf.br ^bb2(%[[ALLOC1]] : memref<32xf32>)
+```
+
+(6) `expected-error`：用来检查代码中的检查行为是否生效
+
+```text
+  // expected-error @+1 {{failed to legalize operation 'mhlo.uniform_dequantize' that was explicitly marked illegal}}
 ```
 
 ---

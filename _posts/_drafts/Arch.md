@@ -92,7 +92,9 @@ Thread Block Cluster 的提出是因为以 thread block 为粒度执行任务阻
 
 比如 Ampere 4 个 warp scheduler，所以 thread block 一般线程数不会少于 128 个，256 个比较常用，因为可以切换 warp 来减少 stall 的时间。
 
-每个 warp scheduler 🈶两个 instruction dispatch，每个 cycle 都可以向当前处于其上的 warp 发送两条指令。
+每个 warp scheduler 有两个 instruction dispatch，每个 cycle 都可以向当前处于其上的 warp 发送两条指令。
+
+但是要求这两条指令满足：数据独立、不同的硬件单元、前序指令已经完成发射
 
 ## memory unit
 
