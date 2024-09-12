@@ -171,6 +171,8 @@ mask 为遮盖，类似decoder Attn中的mask。一是规范访存行为，防�
 
 - @triton.jit：表示下面这段代码是一个triton kernel
 
+编译流程中，首先会将 `jit` 修饰的 kernel 给打包成一个 `JITFunction`，见 [runtime/jit.py](https://github.com/triton-lang/triton/blob/main/python/triton/runtime/jit.py#L824)。
+
 > `@triton.jit` 中还可以传一个参数 `do_not_specialize`，来阻止 triton 生成过多的 kernel。 triton jit 会以每一个非指针参数为准，去生成一个kernel，比如某一个参数运行时取值可能为1或0，那么 triton 就会为它们各生成一个。
 
 - @[auto-tuning](https://triton-lang.org/main/python-api/generated/triton.autotune.html) ：由 `@triton.jit`装饰的kernel可以调用 `@auto-tuning` detector触发自动调优
@@ -244,6 +246,37 @@ Triton中关于grid定义：
   dim3 grid((M + BLOCK_SIZE_M - 1) / BLOCK_SIZE_M, (N + BLOCK_SIZE_N - 1) / BLOCK_SIZE_N);
   matmul_kernel<<<grid, block>>>(Ad, Bd, Cd, M, N, K);
 ```
+
+## cache
+
+> `triton cache` 默认存在 `~/.triton/cache/` 文件夹下，当然也可以使用 `export TRITON_CACHE_DIR=xxx` 来指定。
+
+triton 是 jit 的执行模式，但为了减少编译时间，其实会保留每次编译得到的 kernel，所以真实的编译流程是：
+
+1. 根据 kernel 信息生成一个 `metadata_filename`(一个 json 文件)，然后在cache目录中查找
+
+```python
+    if not always_compile and metadata_path is not None:
+        # cache hit!
+        metadata = json.loads(Path(metadata_path).read_text())
+        return CompiledKernel(src, metadata_group, hash) # hash
+```
+
+2. 如果找到了就用，没找到就需要编译
+
+python->ast->ttir->...
+
+3. 某个op多次执行，什么时候会hit cache，什么时候需要重新编译呢？
+
+这需要从 triton 何时会产生一个新 cache 讲起。 triton 会以 [key](https://github.com/triton-lang/triton/blob/main/python/triton/runtime/jit.py#L616) 为核心，key 包含 `sig_and_spec`, `constexpr_vals` 和 `excess_kwargs`。
+
+- `sig_and_spec`： 函数名 和 参数类型，直接表现在 kernel 上。当参数类型很多的时候也可以使用 `do_not_specialize` 来排除掉某些参数的影响，来避免生成更多的 kernel。
+- `constexpr_vals`： 标记为 `tl.constexpr` 的参数
+- `excess_kwargs`：`num_stages`, `num_warps`, `num_stages` 等
+
+## launch
+
+由于每个 kernel 的参数可能不同，所以需要为其生成不同的执行函数，会使用 kernel 的一些信息和[固定的代码拼接](https://github.com/triton-lang/triton/blob/main/third_party/nvidia/backend/driver.py#L147)。最终变成一个可以调以调用的接口。
 
 # special
 

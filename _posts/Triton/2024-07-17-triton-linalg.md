@@ -2303,10 +2303,10 @@ lib/Pipelines/Pipelines.cpp
 
 此外，还有一些非 mlir 官方的 pass 值得关注：
 
-- WrapFuncBodyWithSingleBlockPass: 当 funcOp 中有多个 block(一般含有 BranchOpInterface 的op时会有多个 block)，创建一个 scf.execute_region 将所有 block 包起来，方便后序的分析。
+- WrapFuncBodyWithSingleBlockPass: 当 funcOp 中有多个 block(一般含有 BranchOpInterface 的op时会有多个 block)，创建一个 scf.execute_region 将所有 block 包起来，方便后序inline。
 - CanonicalizeTritonPass: 为了方便后序 conversion，将 op canoncialize 成等效的形式。
 - PointerStrengthReductionPass: 支持跨block(BranchOpInterface和RegionBranchOpInterface)的ptr分析。
-- ExtractLikeMoveBackwardPass: 调整extractOp的位置。
+- ExtractLikeMoveBackwardPass: extractOp向前移动，减少计算量。(add+extract -> extract+add)
 - ArithCanonicalizerPass: 将一些 arith op 转为等效的计算形式；规范化存在nan时的计算图。
 
 > 这些pass的测试都在 `test/Dialect/Triton/` 下

@@ -1754,7 +1754,7 @@ Linalg Dialect 是很重要的一个层级，在这之前的 dialect 更多得�
 
 ### op
 
-- linalg.generic
+- linalg.generic：其实是以完美嵌套循环表示的计算
 - linalg.fill
 - linalg.map{ arith.op / math.op }
 
@@ -4969,6 +4969,7 @@ mlir 的框架中主要有两种数据抽象， tensor 和 memref(aka. buffer)�
   - memref 是可变的，可以被多次 def，并且许多 memref 是可能存在 alias 关系，所以在 data flow analysis 中需要考虑 alias analysis。
   - tensor 上的 rewrite 更简单，因为 tensor 操作都没有 side-effect，而 memref 操作大概率有。
   - memref 中 ir 的顺序很重要，移动 ir 可能导致程序语义改变，所以 clone 行为要注意。而 tensor 中的 clone 行为一般没问题。
+- memref 上的读写和依赖分析会更加复杂，因为有 alias 行为，所以需要找到所有的定值行为。
 
 对于 ir-on-memref，我们不能轻易改变 ir 的相对位置，例如以下情况，我们不能将 `%load` 直接拷贝到 `scf.forall` 的body中，因为 `%load` 到 `scf.forall` 之间可能存在对 `%alloc` 的写 `def %alloc`。
 

@@ -135,6 +135,7 @@ scf.for %arg = %c0 to %c32_index step %c1 iter_args(%arg1 = %input) -> (!tt.ptr<
   - !tt.ptr<f32>
   - !tt.ptr<tensor<2xf32>>  这就是 TensorPointerType
   - !tt.ptr<!tt.ptr<f32>>
+- tensor<2x3x!tt.ptr<f32>> 这是blockPtr
 
 PointerType 的 `getPointeeType()` 方法会获得 PointerType 内的类型。上面三个分别获得 f32, tensor<2xf32>, !tt.ptr<f32>
 
