@@ -42,7 +42,16 @@ encoder的设计初衷是给 decoder 提供完整输入序列的 feature 表示�
 
 5.kvcache
 
+kvcache只适用于decoder self-attention结构，因为decoder结构有casual_mask，self-attention的KV需要按步更新。
+
 以空间换时间。
+
+![cache](/assets/img/blog/img_llm_inference_optim/cache.png)
+
+- 传统注意力计算时，需要将当前时刻的 `Q` 去乘以过去所有时刻的 `K`，如果没有KV Cache，每一次就需要重新计算KV。
+- 使用kv cache后，就不需要重新计算之前的KV Cache。
+
+GEMM 降级到 GEMV 后，还想继续用上 tensor core，可以增加计算的并行，将运算拼接成一个GEMM。
 
 window attn：每个token只和包含本身在内的前n个token做attn（使用前几次decode的kvcache），这样kvcache就可以只存一个window的个数。更早的token信息可以跨层流动，就像cnn中的感受野（输出只跟一些输入有关）
 
