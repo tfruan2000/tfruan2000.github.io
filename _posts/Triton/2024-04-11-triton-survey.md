@@ -8,44 +8,147 @@ tags: [Triton, Survey]
 
 # background
 
-## 推荐repo
-
-- 理解triton语法的repo：[triton-puzzles](https://github.com/srush/Triton-Puzzles)
-
-- 很多用triton实现的kernel的repo：[lightllm](https://github.com/ModelTC/lightllm)
-
 ## cuda vs triton
 
-cuda和triton编程模式
+cuda和triton编程模式对比
 
 ![cuda_vs_triton](/assets/img/blog/img_triton_survey/cuda_vs_triton.png)
 
-gpu层次结构图如下
+相比 cuda， triton 其实是 **性能和效率的 trade-off**。很多 cuda 上人为的操作行为都是交给 compiler 来自动完成，很适合对硬件了解较少的同学来实现新的模型算法。
 
-![gpu_arch](/assets/img/blog/img_triton_survey/gpu_arch.png)
+比CUDA的SIMT编程范式，由多个thread并行处理，triton更接近SIMD编程范式，一次处理一片数据（基于block算法的编程范式）
 
-一个 kernel 有一个 grid，，每个 grid 最多可以配置 65535 个 thread block，每个 thread block 最多可以配置 512 个 thread。每个 thread block 由一个 SM 负责运算。 一个 thread block 内部的所有 thread 都有独自的 local mem 来存储数据，并且 thread 之间可以通过 SM 中的 smem 共享数据。thread block 内部的 thread 会以 warp 为单位运行，目前一个 warp 的配置一般就是 32 thread。
+直接对线程块进行编程，每一个操作都是应用在块上，不再控制单个的线程，省去线程之间的同步等操作
 
-每个 SM 都有独立的 smem, constant cache, register mem，SM之间共享 L2 Cache 和 gdram。 SM(流式多处理器) 中的处理单位称为 SP(流示处理器)。
+![cuda_triton](/assets/img/blog/img_triton_survey/cuda_triton.png)
 
-> 自 Volta 架构后，SM 中的 smem 和 L1 Cache 就合并成一块 memory block 了。
-> 如此程序员就可以自行配置 smem 的大小，在放存密集且连续的场景下（例如matmul），smem大一些性能更好。但是 smem 和 L1 Cache的总大小是一定的。
->
-> L1 Cache保留的原因：L1在某些场景下也是必要的，例如以 sparse computing 中；smem是很快会用到的，L1是从dram上取来的，cache是防止低速访存必要的，smem能防止污染cache。
->
-> Hopper 架构中引入了 SM-to-SM 的高速网络，实现了 SM 之间的 smem 互相访问。这为 Thread Block Cluster 提供了编程支持。
-> Thread Block Cluster 的提出是因为以 thread block 为粒度执行任务阻碍运行效率。需要提供更大粒度的线程组。所以一个 thread block cluster 中包含多个 thread block，其中所有 thread 都可以访问负责该 thread block cluster 计算的 SM 群的 smem，这些 smem 一起称为 distributed smem。
+## 推荐repo
 
-CTA（Cooperative Thread Array）：CTA是一个线程组，由一组线程组成，这些线程可以在GPU上的多个处理器中并行执行。**CTA中的线程可以协同工作，通过共享内存等方式进行通信和协作**。CTA通常是在CUDA编程模型中使用的概念，它是将工作任务划分为较小的线程块以便并行执行的基本单元。
+OpenAI [Triton](https://github.com/triton-lang/triton/tree/main) 是什么？这个问题很多大佬都已经回答过了，阅读完以下 blog 相信大家会有个基础的理解
 
-> 其实 CTA 就是 thread block。
-> Triton 编程不关心 Block 内的行为， thread 和 warp 的 schedule 由编译器完成。
+- 杨军老师的 [谈谈对OpenAI Triton的一些理解](https://zhuanlan.zhihu.com/p/613244988)，帮助大家建立一个宏观印象
+- 董鑫大佬的 [如何入门 OpenAI Triton 编程?](https://www.zhihu.com/question/622685131/answer/3217107882)，帮助了解更多关于语法上的信息
+- BobHuang大佬的 [浅析 Triton 执行流程](https://zhuanlan.zhihu.com/p/712640431)，帮助初学者大致明白一段 python 程序如何进入 triton pipeline，然后跑起来。
+- 理解triton语法的repo：[triton-puzzles](https://github.com/srush/Triton-Puzzles)
+- 很多用triton实现的kernel的repo：[lightllm](https://github.com/ModelTC/lightllm)
 
-**一个CTA通常由多个warp组成**。一个CTA的线程数量可以是32的倍数（例如，CTA可以有32、64、96等线程）。CTA内的线程被划分为一组一组的warp，每个warp中的线程同时执行相同的指令。每个warp中的thread若访问的内存区域连续，那么这些访问行为可以被coalesce。
+# 组成
 
-CGA（Cooperative Grid Array）：CGA是一种更高级的概念，它是一组CTA的集合，可以在GPU上协同工作。CGA可以用于更大规模的并行计算，将任务划分为多个CTA进行执行，并且CTA之间可以通过全局内存进行通信和同步。
+triton 的[组成](https://github.com/triton-lang/triton/tree/main/python/triton)：
 
-> triton-lang中有一个关于优化 CGA 中 CTA 行为的[pass](https://github.com/triton-lang/triton/blob/main/include/triton/Dialect/TritonNvidiaGPU/Transforms/Passes.td#L27)
+- [language](https://github.com/triton-lang/triton/tree/main/python/triton/language)：前端的triton-lang语法
+- [compiler](https://github.com/triton-lang/triton/tree/main/python/triton/compiler)：kernel编译的行为，会根据后端调用对应的pipeline，把triton-lang下降到硬件汇编
+- [runtime](https://github.com/triton-lang/triton/tree/main/python/triton/runtime)：cache，auto-tuning， jit 等组件
+- [backends](https://github.com/triton-lang/triton/tree/main/python/triton/backends): 编译完后，在执行时掉用的是真实后端，例如 [nvgpu](https://github.com/triton-lang/triton/tree/main/third_party/nvidia/backend)，这里主要包含 compiler 时的 pipeline 组织， launch 函数(使用模版加真实kernel参数生成真实的launch函数)等
+
+## languague
+
+作为 triton 项目的 fontend，包含每个原语的构造行为（例如op的某些类型会偷偷转为默认的f32来计算）。
+
+官方提供了原语的用法手册：https://triton-lang.org/main/index.html
+
+**tl规定了ir必须表达为static的**，不允许 mlir 中 dynamic shape 的表达。
+
+## compiler
+
+以 nvgpu 为例，triton-lang 的下降流程：
+
+triton-lang -> triton dialect -> triton gpu dialect -> nvgpu dialect -> llvm ir + nvvm ir -> ptx
+
+![triton_arch_now](/assets/img/blog/img_triton_survey/triton_arch_now.png)
+
+compiler支持多后端的方向：通过Linalg dialect
+
+![triton_arch](/assets/img/blog/img_triton_survey/triton_arch.png)
+
+## runtime
+
+### jit
+
+`@triton.jit`装饰器 表示下面这段代码是一个 triton kernel
+
+编译流程中，首先会将 `jit` 修饰的 kernel 给打包成一个 `JITFunction`，见 [runtime/jit.py](https://github.com/triton-lang/triton/blob/main/python/triton/runtime/jit.py#L824)。
+
+> `@triton.jit` 中还可以传一个参数 `do_not_specialize`，来阻止 triton 生成过多的 kernel。 triton jit 会以每一个非指针参数为准，去生成一个kernel，比如某一个参数运行时取值可能为1或0，那么 triton 就会为它们各生成一个。
+
+### auto-tuning
+
+@[auto-tuning](https://triton-lang.org/main/python-api/generated/triton.autotune.html) ：由 `@triton.jit`装饰的kernel可以调用 `@auto-tuning` detector触发自动调优
+
+使用上需要提供一个configs（包含在kernel中定义的 `tl.constexpr`）列表，autotune会多次运行kernel函数来评估configs中的所有配置。（配置是人为给出的，所以空间不大，依赖人为经验）
+
+- key：参数列表，当key中的参数改变时，需要重新评估configs
+
+- prune_configs_by：用户可以传入函数来帮助减枝（例如基于性能模型的函数），加快收敛
+
+- reset_to_zero：输入参数名列表，在运行前将这些参数重置为0
+
+- warmup：每个config的warmup时间，默认25ms
+
+- rep：每个config的重复时间，默认100ns
+
+```python
+@triton.autotune(
+    configs=[
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8}, num_stages=3, num_warps=8),
+        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=5, num_warps=2),
+        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=5, num_warps=2),
+    ],
+    key=['M', 'N', 'K'],
+)
+```
+
+当前**要求所有BLOCK_SIZE设置的值都得是2次幂**
+
+```python
+n_rows, n_cols = x.shape
+BLOCK_SIZE = triton.next_power_of_2(n_cols)
+```
+
+### cache
+
+> `triton cache` 默认存在 `~/.triton/cache/` 文件夹下，当然也可以使用 `export TRITON_CACHE_DIR=xxx` 来指定。
+
+triton 是 jit 的执行模式，但为了减少编译时间，其实会保留每次编译得到的 kernel，所以真实的编译流程是：
+
+1.根据 kernel 信息生成一个 `metadata_filename`(一个 json 文件)，然后在cache目录中查找 `.so`
+
+> 由 `jit` 产生的cache： 根据 kernel 源代码和参数的哈希值进行缓存
+
+```python
+    if not always_compile and metadata_path is not None:
+        # cache hit!
+        metadata = json.loads(Path(metadata_path).read_text())
+        return CompiledKernel(src, metadata_group, hash) # hash
+```
+
+2.如果找到了就用，没找到就需要编译
+
+python->ast->ttir->...
+
+3.某个op多次执行，什么时候会hit cache，什么时候需要重新编译呢？
+
+这需要从 triton 何时会产生一个新 cache 讲起。 triton 会以 [key](https://github.com/triton-lang/triton/blob/main/python/triton/runtime/jit.py#L616) 为核心，key 包含 `sig_and_spec`, `constexpr_vals` 和 `excess_kwargs`。
+
+- `sig_and_spec`： 函数名 和 参数类型，直接表现在 kernel 上。当参数类型很多的时候也可以使用 `do_not_specialize` 来排除掉某些参数的影响，来避免生成更多的 kernel。
+- `constexpr_vals`： 标记为 `tl.constexpr` 的参数
+- `excess_kwargs`：`num_stages`, `num_warps`, `num_stages` 等
+
+**tuning config(条例不同)** 产生的 cache 和 **jit(kernel参数不同)** 产生的 cache 是两种cache。
+
+- 来自 `tuning config`：保存调优时性能最好的配置
+- 来自 `jit`：避免重复编译
+
+## backend
+
+### launch
+
+由于每个 kernel 的参数可能不同，所以需要为其生成不同的执行函数，会使用 kernel 的一些信息和[固定的代码拼接](https://github.com/triton-lang/triton/blob/main/third_party/nvidia/backend/driver.py#L147)。最终变成一个可以调以调用的接口。
 
 # elements
 
@@ -120,7 +223,7 @@ def add(x: torch.Tensor, y: torch.Tensor):
 
 ## pid
 
-虚拟循环 `pid = tl.program_id(axis=0)` ，每个kernel可能被执行多次
+一个 job 被分成 grid 个 task。`pid = tl.program_id(axis=0)` 表示当前是第几个task
 
 1. program_id是这个虚拟的**for 循环 里面的 index** (第几次循环，实际中这些循环是并行)
 
@@ -167,136 +270,7 @@ mask 为遮盖，类似decoder Attn中的mask。一是规范访存行为，防�
 
 例如offset=1024，mask为一个1024维的数组，每个数为0/1，当某位为1时，则load该数据，当某位为0时，舍弃。
 
-## detector
-
-- @triton.jit：表示下面这段代码是一个triton kernel
-
-编译流程中，首先会将 `jit` 修饰的 kernel 给打包成一个 `JITFunction`，见 [runtime/jit.py](https://github.com/triton-lang/triton/blob/main/python/triton/runtime/jit.py#L824)。
-
-> `@triton.jit` 中还可以传一个参数 `do_not_specialize`，来阻止 triton 生成过多的 kernel。 triton jit 会以每一个非指针参数为准，去生成一个kernel，比如某一个参数运行时取值可能为1或0，那么 triton 就会为它们各生成一个。
-
-- @[auto-tuning](https://triton-lang.org/main/python-api/generated/triton.autotune.html) ：由 `@triton.jit`装饰的kernel可以调用 `@auto-tuning` detector触发自动调优
-
-使用上需要提供一个configs（包含在kernel中定义的 `tl.constexpr`）列表，autotune会多次运行kernel函数来评估configs中的所有配置。（配置是人为给出的，所以空间不大，依赖人为经验）
-
-- key：参数列表，当key中的参数改变时，需要重新评估configs
-
-- prune_configs_by：用户可以传入函数来帮助减枝（例如基于性能模型的函数），加快收敛
-
-- reset_to_zero：输入参数名列表，在运行前将这些参数重置为0
-
-- warmup：每个config的warmup时间，默认25ms
-
-- rep：每个config的重复时间，默认100ns
-
-```python
-@triton.autotune(
-    configs=[
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8}, num_stages=3, num_warps=8),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=5, num_warps=2),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=5, num_warps=2),
-    ],
-    key=['M', 'N', 'K'],
-)
-```
-
-**要求所有BLOCK_SIZE设置的值都得是2次幂**
-
-```python
-n_rows, n_cols = x.shape
-BLOCK_SIZE = triton.next_power_of_2(n_cols)
-```
-
 ## grid
-
-调用kernel时，需要说明该kernel执行循环有几层，每层有几次，这就是 `grid` 的概念
-
-下述代码表示了这个 vector-add kernel是在一层for循环内调用执行，每次数据大小 `BLOCK_SIZE`
-
-```python
-  grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
-  add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
-```
-
-Triton中关于grid定义：
-
-```python
-    grid = lambda META: (
-        triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
-    )
-    matmul_kernel[grid](
-        a, b, c,
-        M, N, K,
-        a.stride(0), a.stride(1),
-        b.stride(0), b.stride(1),
-        c.stride(0), c.stride(1),
-        ACTIVATION=activation
-    )
-```
-
-对比Cuda中launch kernel的行为
-
-```cpp
-  dim3 block(BLOCK_SIZE_M, BLOCK_SIZE_N);
-  dim3 grid((M + BLOCK_SIZE_M - 1) / BLOCK_SIZE_M, (N + BLOCK_SIZE_N - 1) / BLOCK_SIZE_N);
-  matmul_kernel<<<grid, block>>>(Ad, Bd, Cd, M, N, K);
-```
-
-## cache
-
-> `triton cache` 默认存在 `~/.triton/cache/` 文件夹下，当然也可以使用 `export TRITON_CACHE_DIR=xxx` 来指定。
-
-triton 是 jit 的执行模式，但为了减少编译时间，其实会保留每次编译得到的 kernel，所以真实的编译流程是：
-
-1. 根据 kernel 信息生成一个 `metadata_filename`(一个 json 文件)，然后在cache目录中查找
-
-```python
-    if not always_compile and metadata_path is not None:
-        # cache hit!
-        metadata = json.loads(Path(metadata_path).read_text())
-        return CompiledKernel(src, metadata_group, hash) # hash
-```
-
-2. 如果找到了就用，没找到就需要编译
-
-python->ast->ttir->...
-
-3. 某个op多次执行，什么时候会hit cache，什么时候需要重新编译呢？
-
-这需要从 triton 何时会产生一个新 cache 讲起。 triton 会以 [key](https://github.com/triton-lang/triton/blob/main/python/triton/runtime/jit.py#L616) 为核心，key 包含 `sig_and_spec`, `constexpr_vals` 和 `excess_kwargs`。
-
-- `sig_and_spec`： 函数名 和 参数类型，直接表现在 kernel 上。当参数类型很多的时候也可以使用 `do_not_specialize` 来排除掉某些参数的影响，来避免生成更多的 kernel。
-- `constexpr_vals`： 标记为 `tl.constexpr` 的参数
-- `excess_kwargs`：`num_stages`, `num_warps`, `num_stages` 等
-
-## launch
-
-由于每个 kernel 的参数可能不同，所以需要为其生成不同的执行函数，会使用 kernel 的一些信息和[固定的代码拼接](https://github.com/triton-lang/triton/blob/main/third_party/nvidia/backend/driver.py#L147)。最终变成一个可以调以调用的接口。
-
-# special
-
-## SIMD的编程范式
-
-比CUDA的SIMT编程范式，由多个thread并行处理
-
-triton是SIMD编程范式，一次处理一片数据（基于block算法的编程范式）
-
-直接对线程块进行编程，每一个操作都是应用在块上，不再控制单个的线程，省去线程之间的同步等操作
-
-![cuda_triton](/assets/img/blog/img_triton_survey/cuda_triton.png)
-
-## block-level control- and data-flow analysis
-
-triton compiler依赖block-level control- and data-flow analysis来静态地schedule iterator blocks
-
-离散优化：尽量保证数据加载连续性—>分析每一步操作并总结出stride和strideVal，最终用于静态信息将tl.load优化成tensor.extract_slice（下降结果ir中最耗时的是copy），比d2d的离散访存速度快
-
-## grid 每个triton kernel跑在一个grid内
 
 调用kernel时，需要说明该kernel执行循环有几层，每层有几次，这就是 `grid` 的概念
 
@@ -328,98 +302,6 @@ Triton中关于grid定义：
   dim3 block(BLOCK_SIZE_M, BLOCK_SIZE_N);
   dim3 grid((M + BLOCK_SIZE_M - 1) / BLOCK_SIZE_M, (N + BLOCK_SIZE_N - 1) / BLOCK_SIZE_N);
   matmul_kernel<<<grid,block>>>(Ad, Bd, Cd, M, N, K);
-```
-
-下面的group-order的行为能获得更好的data-reuse
-
-![layout](/assets/img/blog/img_triton_survey/layout.png)
-
-分析：A和B中的内容都是行优先存储，以计算九个数为例，那么原始的一次load需要9+9$\times$9=90次read和9次write。而group order中，一次load需要9$\times$3+3$\times$9=54次read和9次write
-
-- num_pid_m 和 num_pid_n 就是为来获得矩阵长宽各可以分为多少个block（上图的黄色小块）
-
-```python
-pid = tl.program_id(axis=0)
-# number of program ids along the M / N axis
-num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
-num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-```
-
-- num_pid_in_group  表示一个高是 `GROUP_SIZE_M` , 宽是 `num_pid_n`的group中包含多少个黄色小块
-
-```python
-# number of program in group
-num_pid_in_group = GROUP_SIZE_M * num_pid_n
-```
-
-- group_id表示当前循环iter是在哪个group内
-
-```python
-# id of the group which related to this program
-group_id = pid // num_pid_in_group
-```
-
-- first_pid_m 表示当前所在的的group内的第一个黄色block是全局的第几个黄色block（从m的维度上看）
-
-```python
-# row-id of the first program in the group
-first_pid_m = group_id * GROUP_SIZE_M = (pid // (GROUP_SIZE_M * num_pid_n)) * GROUP_SIZE_M
-```
-
-- 重复计算下group_size_m，防止越界
-
-```python
-group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-```
-
-- 得到当前循环需要处理哪个块 [pid_m, pid_n]
-
-pid_m ≤ first_pid_m + group_size_m
-
-pid_n 是从左到右一列列来的，000111222
-
-```python
-# row-id of the p in the launch grid
-pid_m = first_pid_m + pid % group_size_m # 行id
-# col-id of the p in the launch grid
-pid_n = (pid % num_pid_in_group) // group_size_m # 列id
-# num_pid_in_group = GROUP_SIZE_M * num_pid_n
-```
-
-a_ptr 是A矩阵第一个元素的地址
-
-`offs_am` 和 `offs_bn` 是 A 矩阵 9 个 block 中第一个 block 中, 每个元素在整个 A 矩阵中的坐标，即 m 维度的 index 和 k 维度的 index
-
-```python
-    # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
-    # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
-    offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
-    offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
-    offs_k = tl.arange(0, BLOCK_SIZE_K)
-    a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
-    b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
-```
-
-```python
-offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-c_ptrs = c+ptr + stride_cm * offset_cm[:, None] + stride_cn * offset_cn[None, :]
-c_mask = (offset_cm[:, None] < M) & (offset_cn[None, :] < N)
-tl.store(c_ptrs, mask=c_mask)
-```
-
-计算循环，mask保证load和store不越界
-
-```python
-    for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
-        # Load the next block of A and B, generate a mask by checking the K dimension.
-        a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
-        b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
-        # We accumulate along the K dimension.
-        accumulator += tl.dot(a, b)
-        # 计算下K个BLOCK
-        a_ptrs += BLOCK_SIZE_K * stride_ak
-        b_ptrs += BLOCK_SIZE_K * stride_bk
 ```
 
 ## num_warp
@@ -531,14 +413,6 @@ In order to **avoid shared memory bank conflicts**, elements may be **swizzled
 ### MMA Layout 和 DotOperand Layout
 
 用来指导 op 下降到特殊指令的 attr。
-
-## triton compiler
-
-![triton_arch_now](/assets/img/blog/img_triton_survey/triton_arch_now.png)
-
-compiler支持多后端的方向：通过Linalg dialect
-
-![triton_arch](/assets/img/blog/img_triton_survey/triton_arch.png)
 
 # trick
 

@@ -48,6 +48,112 @@ ListNode* trainingPlan(ListNode* head, int cnt) {
 }
 ```
 
+## 滑动窗口
+
+1.无重复的最长子串
+
+```cpp
+int lengthOfLongestSubstring(string s) {
+  int size = s.size();
+  if (size < 2) return size;
+  unordered_map<char, int> map;
+  int right = 0, left = 0;
+  int max_len = 0;
+  while (right < size) {
+    char c = s[right];
+    if (map.contains(c) && map[c] >= left) {
+      left = map[c] + 1; // 移动
+    }
+    max_len = max(max_len, right - left + 1);
+    ++right;
+  }
+  return max_len;
+}
+```
+
+2.dLCR 183. 望远镜中最高的海拔
+
+heights[i] 表示对应位置的海拔高度，返回[k, k + limit] 窗口内的 heights[i] 的最大值
+
+```cpp
+vector<int> maxAltitude(vector<int>& heights, int limit) {
+    int n = heights.size();
+    if (limit == 0 || n == 0)
+        return {};
+    if (n == 1)
+        return heights;
+
+    deque<int> q;
+    vector<int> res;
+    res.reserve(n - limit + 1);
+    for (int i = 0; i < limit; ++i) {
+        // 使用 while 一个个出队
+        while (!q.empty() && heights[i] > q.back()) {
+            // 如果 q.back() 大于当前值就不pop
+            // 如果q中只有一个值，说明最大值一直在变
+            q.pop_back();
+        }
+        q.push_back(heights[i]);
+    }
+    res.push_back(q.front());
+    for (int i = limit; i < n; ++i) {
+        while (!q.empty() && heights[i] > q.back()) {
+            q.pop_back();
+        }
+        q.push_back(heights[i]);
+        if (heights[i - limit] == q.front()) {
+            // 当前记录的最大值应该被窗口排出
+            q.pop_front();
+        }
+        res.push_back(q.front());
+    }
+    return res;
+}
+```
+
+3.最小覆盖子串
+
+```cpp
+bool isEqual(unordered_map<char, int> &maps, unordered_map<char, int> &mapt) {
+  for (auto it : mapt) {
+    if (!maps.contains(it.first) || maps[it.first] < it.second)
+      return false;
+  }
+  return true;
+}
+string minWindow(string s, string t) {
+  if (s.size() < t.size()) return {};
+  unordered_map<char, int> mapt, maps;
+  for (char c : t) {
+    ++mapt[c];
+  }
+  for (int i = 0; i < t.size(); ++i) {
+    ++maps[s[i]];
+  }
+  int l = 0, right = t.size() - 1;
+  int len = s.size() + 1, start = 0;
+  while (r < s.size()) {
+    // 右移直到覆盖
+    while (r < s.size() && !isEqual(maps, mapt)) {
+      ++r;
+      if (r < s.size()) ++maps[s[r]];
+    }
+    // 左移直到不覆盖
+    while (isEqual(maps, mapt)) {
+      --maps[s[l]];
+      --l;
+    }
+    int tmp = l - 1;
+    if (r - tmp + 1 < len) {
+      len = r - tmp + 1;
+      record = tmp;
+    }
+  }
+  if (s.size() + 1 == len) return {};
+  return s.substr(record, len);
+}
+```
+
 ## 有序merge
 
 1. LCR 142. 训练计划 IV
@@ -87,50 +193,6 @@ ListNode* trainningPlan(ListNode* l1, ListNode* l2) {
         curr = curr->next;
     }
     return res.next;
-}
-```
-
-# 栈与队列
-
-## 单调栈
-
-1. LCR 183. 望远镜中最高的海拔
-
-heights[i] 表示对应位置的海拔高度，返回[k, k + limit] 窗口内的 heights[i] 的最大值
-
-```cpp
-vector<int> maxAltitude(vector<int>& heights, int limit) {
-    int n = heights.size();
-    if (limit == 0 || n == 0)
-        return {};
-    if (n == 1)
-        return heights;
-
-    deque<int> q;
-    vector<int> res;
-    res.reserve(n - limit + 1);
-    for (int i = 0; i < limit; ++i) {
-        // 使用 while 一个个出队
-        while (!q.empty() && heights[i] > q.back()) {
-            // 如果 q.back() 大于当前值就不pop
-            // 如果q中只有一个值，说明最大值一直在变
-            q.pop_back();
-        }
-        q.push_back(heights[i]);
-    }
-    res.push_back(q.front());
-    for (int i = limit; i < n; ++i) {
-        while (!q.empty() && heights[i] > q.back()) {
-            q.pop_back();
-        }
-        q.push_back(heights[i]);
-        if (heights[i - limit] == q.front()) {
-            // 当前记录的最大值应该被窗口排出
-            q.pop_front();
-        }
-        res.push_back(q.front());
-    }
-    return res;
 }
 ```
 
@@ -738,6 +800,10 @@ int jewelleryValue(vector<vector<int>>& frame) {
     return res[maxi - 1][maxj - 1];
 }
 ```
+
+例：最大子数组和
+
+转移函数 `dp[i] = max(dp[i - 1] + num[i], num[i])`
 
 ## 背包问题
 

@@ -12,6 +12,102 @@ Triton Kernel 的写法可以参考：官方 [tutorial](https://triton-lang.org/
 
 来自 [03-mm](https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html)
 
+## 源码说明
+
+以 [tutorials/03-matrix-multiplication.py](https://github.com/triton-lang/triton/blob/main/python/tutorials/03-matrix-multiplication.py) 中矩阵乘优化为例。
+
+下面的group-order的行为能获得更好的data-reuse
+
+![layout](/assets/img/blog/img_triton_survey/layout.png)
+
+分析：A和B中的内容都是行优先存储，以计算九个数为例，那么原始的一次load需要9+9$\times$9=90次read和9次write。而group order中，一次load需要9$\times$3+3$\times$9=54次read和9次write
+
+- num_pid_m 和 num_pid_n 就是为来获得矩阵长宽各可以分为多少个block（上图的黄色小块）
+
+```python
+pid = tl.program_id(axis=0)
+# number of program ids along the M / N axis
+num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
+num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+```
+
+- num_pid_in_group  表示一个高是 `GROUP_SIZE_M` , 宽是 `num_pid_n`的group中包含多少个黄色小块
+
+```python
+# number of program in group
+num_pid_in_group = GROUP_SIZE_M * num_pid_n
+```
+
+- group_id表示当前循环iter是在哪个group内
+
+```python
+# id of the group which related to this program
+group_id = pid // num_pid_in_group
+```
+
+- first_pid_m 表示当前所在的的group内的第一个黄色block是全局的第几个黄色block（从m的维度上看）
+
+```python
+# row-id of the first program in the group
+first_pid_m = group_id * GROUP_SIZE_M = (pid // (GROUP_SIZE_M * num_pid_n)) * GROUP_SIZE_M
+```
+
+- 重复计算下group_size_m，防止越界
+
+```python
+group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+```
+
+- 得到当前循环需要处理哪个块 [pid_m, pid_n]
+
+pid_m ≤ first_pid_m + group_size_m
+
+pid_n 是从左到右一列列来的，000111222
+
+```python
+# row-id of the p in the launch grid
+pid_m = first_pid_m + pid % group_size_m # 行id
+# col-id of the p in the launch grid
+pid_n = (pid % num_pid_in_group) // group_size_m # 列id
+# num_pid_in_group = GROUP_SIZE_M * num_pid_n
+```
+
+a_ptr 是A矩阵第一个元素的地址
+
+`offs_am` 和 `offs_bn` 是 A 矩阵 9 个 block 中第一个 block 中, 每个元素在整个 A 矩阵中的坐标，即 m 维度的 index 和 k 维度的 index
+
+```python
+    # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
+    # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
+    offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+    offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
+    offs_k = tl.arange(0, BLOCK_SIZE_K)
+    a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
+    b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
+```
+
+```python
+offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+c_ptrs = c+ptr + stride_cm * offset_cm[:, None] + stride_cn * offset_cn[None, :]
+c_mask = (offset_cm[:, None] < M) & (offset_cn[None, :] < N)
+tl.store(c_ptrs, mask=c_mask)
+```
+
+计算循环，mask保证load和store不越界
+
+```python
+    for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
+        # Load the next block of A and B, generate a mask by checking the K dimension.
+        a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
+        b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
+        # We accumulate along the K dimension.
+        accumulator += tl.dot(a, b)
+        # 计算下K个BLOCK
+        a_ptrs += BLOCK_SIZE_K * stride_ak
+        b_ptrs += BLOCK_SIZE_K * stride_bk
+```
+
 ## mn 主序
 
 输入 A, B，输出C，计算：$C = A \times B$
