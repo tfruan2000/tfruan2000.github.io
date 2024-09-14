@@ -45,7 +45,7 @@ triton 的[组成](https://github.com/triton-lang/triton/tree/main/python/triton
 
 作为 triton 项目的 fontend，包含每个原语的构造行为（例如op的某些类型会偷偷转为默认的f32来计算）。
 
-官方提供了原语的用法手册：https://triton-lang.org/main/index.html
+官方提供了原语的用法手册：<https://triton-lang.org/main/index.html>
 
 **tl规定了ir必须表达为static的**，不允许 mlir 中 dynamic shape 的表达。
 
@@ -430,7 +430,6 @@ dumps the IR before every MLIR pass Triton runs
 
 - 使用 `triton-opt` 直接跑 pipeline，加上 `mlir-print-ir-after-all`
 - 改 python 中 triton 库 `site-packages/triton/backend/xxx/compiler.py` 中的代码，例如注释掉下面某个pass来看ir是否不同
-
 
 ```python
     # /usr/lib/python3.10/site-packages/triton/backends/xxx/compiler.py

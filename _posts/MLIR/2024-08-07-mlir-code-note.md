@@ -1051,26 +1051,26 @@ getBlock()
 
 ```cpp
 struct AddOpPat : public OpRewritePattern<AddOp> {
-	using OpRewritePattern<AddOp>::OpRewritePattern;
-	LogicalResult matchAndRewrite(AddOp op,
-		PatternRewriter & rewriter) const override{
-	xxx
-	return success();
+ using OpRewritePattern<AddOp>::OpRewritePattern;
+ LogicalResult matchAndRewrite(AddOp op,
+  PatternRewriter & rewriter) const override{
+ xxx
+ return success();
 }
 };
 
 class AddOpPatPass : public impl::AddOpPatPassBase<AddOpPatPass> {
-	explicit AddOpPatPass() = default;
-	void runOnOperation() override {
-		RewriterPatternset patterns(&getContext());
-		patterns.add<AddOpPat>(patterns.getContext());
-		if (failed(applyPatternAndFlodGreedily(getoperation(), std::move(patterns))))
-			return signalPassFailure();
-	};
+ explicit AddOpPatPass() = default;
+ void runOnOperation() override {
+  RewriterPatternset patterns(&getContext());
+  patterns.add<AddOpPat>(patterns.getContext());
+  if (failed(applyPatternAndFlodGreedily(getoperation(), std::move(patterns))))
+   return signalPassFailure();
+ };
 }
 
 std::unique_ptr<pass> mlir::createAddOpPatPass() {
-	return std::make_unique<AddOpPatPass>;
+ return std::make_unique<AddOpPatPass>;
 }
 ```
 
@@ -1183,10 +1183,10 @@ func.func @matmul(%arg0: memref<12x9xf32, strided<[?, ?], offset: ?>>, %arg1: me
 
 ```cpp
 void runOnOperation() override {
-	RewritePatternSet patterns(&getContext());
-	patterns.add<xxxx>(patterns.getContext(), /*benefit*/2)
-	if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))));
-		return signalPassFailure();
+ RewritePatternSet patterns(&getContext());
+ patterns.add<xxxx>(patterns.getContext(), /*benefit*/2)
+ if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))));
+  return signalPassFailure();
 }
 ```
 
@@ -1216,9 +1216,9 @@ target.addDynamicallyLegalOp
 
 ```cpp
 target.markUnknownOpDynamicallyLegal([](Operation *op) {
-	if (isa<math::MathDialect>(op->getDialect()) &&
-			llvm::isa<math::LogOp, math::ExpOp,...>(op)) {
-	   return op->getResultTypes().front().isa<ShapedType>();
+ if (isa<math::MathDialect>(op->getDialect()) &&
+   llvm::isa<math::LogOp, math::ExpOp,...>(op)) {
+    return op->getResultTypes().front().isa<ShapedType>();
   }
   return true;
 });
@@ -1226,8 +1226,8 @@ target.markUnknownOpDynamicallyLegal([](Operation *op) {
 RewritePatternSet patterns(&ctx);
 patterns.add<xxx>(patterns.getContext());
 if(failed(applyParticalCpnversion(getOperation(), target,
-																	std::move(patterns))))
-	return signalPassFailure();
+                 std::move(patterns))))
+ return signalPassFailure();
 ```
 
 ConversionPattern相比RewriterPattern一般多一个[adaptor](#adaptor)参数，用于访问op的opernads
@@ -1282,15 +1282,15 @@ struct ConstantCompositeOpPattern final
   LogicalResult matchAndRewrite(arith::ConstantOp op,
                                 opAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-	...
-	}
+ ...
+ }
 }
 ...
 void mlir::populateArithToSPIRVPatterns(RewritePatternSet &patterns) {
-	patterns.add<ConstantCompositeOpPattern>(patterns.getContext());
-	// 可以设置pattern的/*benefit=*/
-	// patterns.add<ConstantCompositeOpPattern>(patterns.getContext(), /*benefit=*/2);
-	...
+ patterns.add<ConstantCompositeOpPattern>(patterns.getContext());
+ // 可以设置pattern的/*benefit=*/
+ // patterns.add<ConstantCompositeOpPattern>(patterns.getContext(), /*benefit=*/2);
+ ...
 }
 } // namespace
 ```
@@ -1345,7 +1345,7 @@ mlir/Conversion/LLVMCommon/TypeConverter.h
 ```cpp
 typeConverter converter;
 converter.addConversion([&]ToyIntegerType t) -> std::optional<Integer> {
-	return Integer::get(&getContext(), t.getWidth())
+ return Integer::get(&getContext(), t.getWidth())
 }
 ```
 
@@ -1406,10 +1406,10 @@ Operation都包含Results和Operands；Results中包含多个OpResult实例，Op
 
 ```cpp
 for (auto operand : op.getOperands()) {
-	if (auto *def = op.getDefiningOp()) {
-	} else {
-		// BlockArgument
-	}
+ if (auto *def = op.getDefiningOp()) {
+ } else {
+  // BlockArgument
+ }
 }
 ```
 
@@ -1419,7 +1419,7 @@ for (auto operand : op.getOperands()) {
 IRMapping mapping;
 mapping().map(op1.getResults(), op2.getResults());
 for (auto &opOperand : op3.getOpOperands()) {
-	// 将 op3 的参数里含有 op1 results 的替换为 op2 的
+ // 将 op3 的参数里含有 op1 results 的替换为 op2 的
   // lookupOrDefault 指找不到 mapping 就用原来的
   opOperand.set(mapping.lookupOrDefault(opOperand.get()));
 }
@@ -1552,7 +1552,7 @@ struct MatmulOpInterface : public AggregatedOpInterface::ExternalModel<
   FailureOr<SmallVector<Operation *>>
   decomposeOperation(Operation *op, Operation *value,
                      PatternRewriter &rewriter) const {
-	}
+ }
 };
 ```
 
@@ -1891,88 +1891,88 @@ mlir/lib/Dialect/SCF/IR/SCF.cpp
 
 - scf.if
 
-	```cpp
-	Block *IfOp::thenBlock() { return &getThenRegion().back(); }
-	YieldOp IfOp::thenYield() { return cast<YieldOp>(&thenBlock()->back()); }
+ ```cpp
+ Block *IfOp::thenBlock() { return &getThenRegion().back(); }
+ YieldOp IfOp::thenYield() { return cast<YieldOp>(&thenBlock()->back()); }
 
-	auto cond = op.getCondition();
-	auto thenYieldArgs = op.thenYield().getOperands();
-	auto elseYieldArgs = op.elseYield().getOperands();
-	```
+ auto cond = op.getCondition();
+ auto thenYieldArgs = op.thenYield().getOperands();
+ auto elseYieldArgs = op.elseYield().getOperands();
+ ```
 
-	有一个 `scf.if` 的canonicalize pattern，叫 `ConvertTrivialIfToSelect`，可以尽量消除 else region
+ 有一个 `scf.if` 的canonicalize pattern，叫 `ConvertTrivialIfToSelect`，可以尽量消除 else region
 
-	经常在 `bufferize` 后的 `canonicalize` 起效，因为`bufferize` 后 `scf.yield` 的operand更关系更明确了
+ 经常在 `bufferize` 后的 `canonicalize` 起效，因为`bufferize` 后 `scf.yield` 的operand更关系更明确了
 
-	```text
-	// ./build/bin/mlir-opt test_if.mlir --split-input-file --one-shot-bufferize --canonicalize
+ ```text
+ // ./build/bin/mlir-opt test_if.mlir --split-input-file --one-shot-bufferize --canonicalize
 
-	// 不能命中，因为thenRegion的yield value属于thenRegion
-	// %1 = arith.cmpi slt, %arg1, %c0_i32 : i32
-	// %2 = scf.if %1 -> (memref<2xi32>) {
-	//   %alloc_0 = memref.alloc() {alignment = 64 : i64} : memref<2xi32>
-	//   linalg.map { math.absi } ins(%0 : memref<2xi32, strided<[?], offset: ?>>) outs(%alloc_0 : memref<2xi32>)
-	//   scf.yield %alloc_0 : memref<2xi32>
-	// } else {
-	//   scf.yield %alloc : memref<2xi32>
-	// }
-	func.func @test_if (%arg0 : tensor<2xi32>, %arg1 : i32) -> tensor<2xi32> {
-	  %cst = arith.constant 0 :i32
-	  %0 = tensor.empty() : tensor<2xi32>
-	  %1 = linalg.fill ins(%cst : i32) outs(%0 : tensor<2xi32>) -> tensor<2xi32>
-	  %2 = arith.cmpi slt, %arg1, %cst : i32
-	  %3 = scf.if %2 -> tensor<2xi32> {
-	    %4 = tensor.empty() : tensor<2xi32>
-	    %5 = linalg.map{math.absi} ins(%arg0 : tensor<2xi32>) outs(%4: tensor<2xi32>)
-	    scf.yield %5 : tensor<2xi32>
-	  } else {
-	    scf.yield %1 : tensor<2xi32>
-	  }
-	  return %3 : tensor<2xi32>
-	}
+ // 不能命中，因为thenRegion的yield value属于thenRegion
+ // %1 = arith.cmpi slt, %arg1, %c0_i32 : i32
+ // %2 = scf.if %1 -> (memref<2xi32>) {
+ //   %alloc_0 = memref.alloc() {alignment = 64 : i64} : memref<2xi32>
+ //   linalg.map { math.absi } ins(%0 : memref<2xi32, strided<[?], offset: ?>>) outs(%alloc_0 : memref<2xi32>)
+ //   scf.yield %alloc_0 : memref<2xi32>
+ // } else {
+ //   scf.yield %alloc : memref<2xi32>
+ // }
+ func.func @test_if (%arg0 : tensor<2xi32>, %arg1 : i32) -> tensor<2xi32> {
+   %cst = arith.constant 0 :i32
+   %0 = tensor.empty() : tensor<2xi32>
+   %1 = linalg.fill ins(%cst : i32) outs(%0 : tensor<2xi32>) -> tensor<2xi32>
+   %2 = arith.cmpi slt, %arg1, %cst : i32
+   %3 = scf.if %2 -> tensor<2xi32> {
+     %4 = tensor.empty() : tensor<2xi32>
+     %5 = linalg.map{math.absi} ins(%arg0 : tensor<2xi32>) outs(%4: tensor<2xi32>)
+     scf.yield %5 : tensor<2xi32>
+   } else {
+     scf.yield %1 : tensor<2xi32>
+   }
+   return %3 : tensor<2xi32>
+ }
 
-	// -----
-	// 可以命中，但不产生select，因为trueVal == falseVal
-	// %1 = arith.cmpi slt, %arg1, %c0_i32 : i32
-	// scf.if %1 {
-	//    linalg.map { math.absi } ins(%0 : memref<2xi32, strided<[?], offset: ?>>) outs(%alloc : memref<2xi32>)
-	func.func @test_if (%arg0 : tensor<2xi32>, %arg1 : i32) -> tensor<2xi32> {
-	  %cst = arith.constant 0 :i32
-	  %0 = tensor.empty() : tensor<2xi32>
-	  %1 = linalg.fill ins(%cst : i32) outs(%0 : tensor<2xi32>) -> tensor<2xi32>
-	  %2 = arith.cmpi slt, %arg1, %cst : i32
-	  %3 = scf.if %2 -> tensor<2xi32> {
-	    %5 = linalg.map{math.absi} ins(%arg0 : tensor<2xi32>) outs(%1: tensor<2xi32>)
-	    scf.yield %5 : tensor<2xi32>
-	  } else {
-	    scf.yield %1 : tensor<2xi32>
-	  }
-	  return %3 : tensor<2xi32>
-	}
+ // -----
+ // 可以命中，但不产生select，因为trueVal == falseVal
+ // %1 = arith.cmpi slt, %arg1, %c0_i32 : i32
+ // scf.if %1 {
+ //    linalg.map { math.absi } ins(%0 : memref<2xi32, strided<[?], offset: ?>>) outs(%alloc : memref<2xi32>)
+ func.func @test_if (%arg0 : tensor<2xi32>, %arg1 : i32) -> tensor<2xi32> {
+   %cst = arith.constant 0 :i32
+   %0 = tensor.empty() : tensor<2xi32>
+   %1 = linalg.fill ins(%cst : i32) outs(%0 : tensor<2xi32>) -> tensor<2xi32>
+   %2 = arith.cmpi slt, %arg1, %cst : i32
+   %3 = scf.if %2 -> tensor<2xi32> {
+     %5 = linalg.map{math.absi} ins(%arg0 : tensor<2xi32>) outs(%1: tensor<2xi32>)
+     scf.yield %5 : tensor<2xi32>
+   } else {
+     scf.yield %1 : tensor<2xi32>
+   }
+   return %3 : tensor<2xi32>
+ }
 
-	// -----
-	// 产生select
-	// %1 = arith.cmpi slt, %arg1, %c0_i32 : i32
-	// %2 = arith.select %1, %alloc, %alloc_0 : memref<2xi32>
-	// scf.if %1 {
-	//  linalg.map { math.absi } ins(%0 : memref<2xi32, strided<[?], offset: ?>>) outs(%alloc : memref<2xi32>)
-	func.func @test_if (%arg0 : tensor<2xi32>, %arg1 : i32) -> tensor<2xi32> {
-	  %cst = arith.constant 0 :i32
-	  %0 = tensor.empty() : tensor<2xi32>
-	  %1 = linalg.fill ins(%cst : i32) outs(%0 : tensor<2xi32>) -> tensor<2xi32>
-	  %cst1 = arith.constant 1 :i32
-	  %6 = tensor.empty() : tensor<2xi32>
-	  %7 = linalg.fill ins(%cst1 : i32) outs(%6 : tensor<2xi32>) -> tensor<2xi32>
-	  %2 = arith.cmpi slt, %arg1, %cst : i32
-	  %3 = scf.if %2 -> tensor<2xi32> {
-	    %5 = linalg.map{math.absi} ins(%arg0 : tensor<2xi32>) outs(%1: tensor<2xi32>)
-	    scf.yield %5 : tensor<2xi32>
-	  } else {
-	    scf.yield %7 : tensor<2xi32>
-	  }
-	  return %3 : tensor<2xi32>
-	}
-	```
+ // -----
+ // 产生select
+ // %1 = arith.cmpi slt, %arg1, %c0_i32 : i32
+ // %2 = arith.select %1, %alloc, %alloc_0 : memref<2xi32>
+ // scf.if %1 {
+ //  linalg.map { math.absi } ins(%0 : memref<2xi32, strided<[?], offset: ?>>) outs(%alloc : memref<2xi32>)
+ func.func @test_if (%arg0 : tensor<2xi32>, %arg1 : i32) -> tensor<2xi32> {
+   %cst = arith.constant 0 :i32
+   %0 = tensor.empty() : tensor<2xi32>
+   %1 = linalg.fill ins(%cst : i32) outs(%0 : tensor<2xi32>) -> tensor<2xi32>
+   %cst1 = arith.constant 1 :i32
+   %6 = tensor.empty() : tensor<2xi32>
+   %7 = linalg.fill ins(%cst1 : i32) outs(%6 : tensor<2xi32>) -> tensor<2xi32>
+   %2 = arith.cmpi slt, %arg1, %cst : i32
+   %3 = scf.if %2 -> tensor<2xi32> {
+     %5 = linalg.map{math.absi} ins(%arg0 : tensor<2xi32>) outs(%1: tensor<2xi32>)
+     scf.yield %5 : tensor<2xi32>
+   } else {
+     scf.yield %7 : tensor<2xi32>
+   }
+   return %3 : tensor<2xi32>
+ }
+ ```
 
 ## Tensor
 
@@ -2161,7 +2161,7 @@ SmallVector<Range> domain = op.getInterationDomain(rewriter);
 
 由于是 `OpFoldResult` 类型，访问时使用`getValueOrCreateConstantIndexOp`方法
 
-取size的时候也经常先cast为Attribute
+取size的时候也经常先`dyn_cast`为Attribute
 
 ```cpp
 if (inAttr = range.size.dyn_cast<Attribute>()) {
@@ -2325,7 +2325,7 @@ mlir/include/mlir/IR/IRMapping.h
 IRMapping mapping;
 mapping().map(op1.getResults(), op2.getResults());
 for (auto &opOperand : op3.getOpOperands()) {
-	// 将 op3 的参数里含有 op1 results 的替换为 op2 的
+ // 将 op3 的参数里含有 op1 results 的替换为 op2 的
   // lookupOrDefault 指找不到 mapping 就用原来的
   opOperand.set(mapping.lookupOrDefault(opOperand.get()));
 }
@@ -2428,7 +2428,7 @@ struct TilingResult {
 
 ```cpp
 if (auto intAttr = range.size.dyn_cast<Attribute>()) {
-	tileSize = std::min(setTileSize, intAttr.cast<IntegerAttr>().getInt());
+ tileSize = std::min(setTileSize, intAttr.cast<IntegerAttr>().getInt());
 }
 ```
 
@@ -3155,8 +3155,8 @@ bool all_of(R &&Range, UnaryPredicate P) {
 
 ```cpp
 if (llvm::any_of(op->getRegions(), [](Region &r) {
-		return r.getBlocks().size > 1;
-	}))
+  return r.getBlocks().size > 1;
+ }))
 return failure();
 ```
 
@@ -3651,14 +3651,17 @@ inline bool matchPattern(Attribute attr, const Pattern &pattern) {
 - m_ConstantFloat(FloatAttr::ValueType *bind_value) : 会把值写入bind_value(binds the constant integer value)
 - m_ConstantInt(IntegerAttr::ValueType *bind_value)
 
+判断一个 `OpFoldResult` 的值
+
 ```cpp
-auto opFoldIsConstantValue = [](OpFoldResult ofr, int64_t value) {
+/// Copy from mlir/lib/Dialect/Linalg/Transforms/ElementwiseOpFusion.cpp.
+static bool opFoldIsConstantValue(OpFoldResult ofr, int64_t value) {
   if (auto attr = llvm::dyn_cast_if_present<Attribute>(ofr))
     return cast<IntegerAttr>(attr).getInt() == value;
   llvm::APInt actual;
   return matchPattern(ofr.get<Value>(), m_ConstantInt(&actual)) &&
          actual.getSExtValue() == value;
-};
+}
 ```
 
 ---
@@ -3776,12 +3779,12 @@ mlir/lib/IR/Operation.cpp
     ```cpp
     template <typename OpTy>
     OpTy getParentOfType() {
-    	auto *op = this;
-    	while (op = op->getParentOp()) {
-    		if (auto parentOp = dyn_cast<OpTy>(op))
-    			return parentOp;
-    		return OpTy;
-    	}
+     auto *op = this;
+     while (op = op->getParentOp()) {
+      if (auto parentOp = dyn_cast<OpTy>(op))
+       return parentOp;
+      return OpTy;
+     }
     }
     ```
 
@@ -3812,8 +3815,8 @@ mlir/lib/IR/Operation.cpp
 
 ```cpp
 if (xxx) {
-	op->emitOpError() << "error info" << "."
-	return signalPassFailure();
+ op->emitOpError() << "error info" << "."
+ return signalPassFailure();
 }
 ```
 
@@ -4237,7 +4240,7 @@ static LogicalResult tilingLoopSizeLimitImpl(PatternRewriter &rewriter,
                                              Attribute lowNumAttr,
                                              Attribute highNumAttr) {
   DBGS() << "Enter constraint check: [tilingLoopSizeLimitImpl]\n";
-	LLVM_DEBUG(op->print(DBGS()))
+ LLVM_DEBUG(op->print(DBGS()))
   auto loopPosIntAttr = loopPosAttr.dyn_cast_if_present<IntegerAttr>();
   auto lowNumIntAttr = lowNumAttr.dyn_cast_if_present<IntegerAttr>();
   auto highNumIntAttr = highNumAttr.dyn_cast_if_present<IntegerAttr>();
@@ -4314,26 +4317,26 @@ include/xxx/Transforms/Passes.td  （xxxx一般为project名字，例如iree，�
 
 ```cpp
 def passNamePass : Pass<"pass-flag">, "该pass的作用对象" > { // 作用域可以为 func::FuncOp 或 mlir::ModuleOp
-	let summary = "";
-	let description = [{
-		more detail
-		For example, consider the following input:
+ let summary = "";
+ let description = [{
+  more detail
+  For example, consider the following input:
     ``` mlir
-	  ````
+   ````
     After running, we get the expected:
     ``` mlir
-  	```
+   ```
   ]};
   let constructor = "mlir::xxxx::createPassNamePass()";
   let options = [
-  	Option<"OptionName", "option-tag", "option-input-type", /*default*/"default-option-input-value",
-  				 "Option description.">
+   Option<"OptionName", "option-tag", "option-input-type", /*default*/"default-option-input-value",
+       "Option description.">
   ];
   let dependentDialects = [
-  	// 例如：
-  	"func::FuncDialect";
-  	"linalg::LinalgDialect",
-  	"tensor::TensorDialect",
+   // 例如：
+   "func::FuncDialect";
+   "linalg::LinalgDialect",
+   "tensor::TensorDialect",
   ];
 
 2.Passed.h 中声明pass
@@ -4381,19 +4384,19 @@ class XXXXPattern : public OpRewritePattern<OpTy> {
 
 // 相关代码runOperation()写在匿名空间，匿名空间可以限制标识符的作用域，防止全局空间污染
 struct PassNamePass : public PassNamePassBase<PassNamePass> {
-	// explicit PassNamePass() = default(option-input-type optionName) {
-	// 	 this->optionName.setValue(optionName);
-	// }
-	explicit PassNamePass() = default;
+ // explicit PassNamePass() = default(option-input-type optionName) {
+ //   this->optionName.setValue(optionName);
+ // }
+ explicit PassNamePass() = default;
 
-	void runOnOperation() override {
-		// 根据td中的作用域来返回，如果pass的td定义的作用域是mlir::ModuleOp,则这里返回moduleOp。
+ void runOnOperation() override {
+  // 根据td中的作用域来返回，如果pass的td定义的作用域是mlir::ModuleOp,则这里返回moduleOp。
     // 如果pass.td中没有设置，则返回输入ir的top-level op
-		auto targetOp = getOperation();
-		MLIRContext *ctx = targetOp->getContext();
-		...
-		// 也可以使用pattern
-	}
+  auto targetOp = getOperation();
+  MLIRContext *ctx = targetOp->getContext();
+  ...
+  // 也可以使用pattern
+ }
 
 }
 }; // end struct
@@ -4402,8 +4405,8 @@ struct PassNamePass : public PassNamePassBase<PassNamePass> {
 
 // std::unique_ptr mlir::xxxx::createPassNamePass(option-input-type optionName)
 std::unique_ptr mlir::xxxx::createPassNamePass(){
-	// return std::make_unique<PassNamePass>(optionName);
-	return std::make_unique<PassNamePass>();
+ // return std::make_unique<PassNamePass>(optionName);
+ return std::make_unique<PassNamePass>();
 }
 ```
 
@@ -4415,7 +4418,7 @@ mlir/test/XXX/PassName.mlir
 // RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline='builtin.module(func.func(passname))' | FileCheck %s
 
 func.func @example() -> () {
-	...
+ ...
   return ...
 }
 // CHECK-LABEL: @example
@@ -4452,8 +4455,8 @@ void mlir::bufferization::buildBufferDeallocationPipeline(
   pm.addPass(createCanonicalizerPass());
   pm.addPass(createBufferDeallocationSimplificationPass());
   pm.addPass(createLowerDeallocationsPass());
-	pm.addPass(createCSEPass());
-	pm.addPass(createCanonicalizerPass());
+ pm.addPass(createCSEPass());
+ pm.addPass(createCanonicalizerPass());
 }
 ```
 
@@ -4821,14 +4824,14 @@ mlir/lib/Interfaces/SideEffectInterfaces.cpp
 ```cpp
 def AddOp : ToyOp<"add", [Pure]> {
   let summary = "add operation";
-	// Variadic描述可变参数
+ // Variadic描述可变参数
   let arguments = (ins Variadic<AnyInteger>:$inputs);
   let results = (outs AnyInteger:$result);
 }
 
 def ReturnOp : ToyOp<"return", [Terminator, ReturnLike]> {
   let summary = "return operation"
-	// Optional描述可选参数，在对应的cpp中也用optional声明该变量
+ // Optional描述可选参数，在对应的cpp中也用optional声明该变量
   let arguments = (ins Optional<AnyInteger>:$data);
 }
 
@@ -4836,8 +4839,8 @@ def HWRegOp : ToyOp<"reg"> {
   let summary = "hardware register";
   let arguments = (ins I1:$clock, AnyInteger:$input, Optional<I1>:$reset, UnitAttr:$is_public);
   let results = (outs AnyInteger:$result);
-	// [{}] 来表示长文本
-	// (`a`, $a)表示分组，当^存在时，只有对应的 Optional 或 UnitAttr 存在的时候，才会输出这个分组。
+ // [{}] 来表示长文本
+ // (`a`, $a)表示分组，当^存在时，只有对应的 Optional 或 UnitAttr 存在的时候，才会输出这个分组。
   let assemblyFormat = [{
     (`public` $is_public^)? $input
     `clock` $clock
@@ -4854,8 +4857,8 @@ def AddOp : ToyOp<"add", [Pure]> {
   let summary = "add operation";
   let arguments = (ins Variadic<AnyInteger>:$inputs);
   let results = (outs AnyInteger:$result);
-	// 原本 %0 = “toy.add”(%a, %b) : (i32, i32) -> (i32)
-	let assemblyFormat = "$inputs attr-dict `:` type($inputs) `->` type($result)";
+ // 原本 %0 = “toy.add”(%a, %b) : (i32, i32) -> (i32)
+ let assemblyFormat = "$inputs attr-dict `:` type($inputs) `->` type($result)";
   // 现在下面的也可行 %0 = toy.add %a, %b : i32, i32 -> i32
 }
 ```
@@ -5344,17 +5347,19 @@ mlir/lib/Dialect/Linalg/Transforms/Tiling.cpp
 
 常见概念
 
-- TilingInterface
-
-对于有该interface的op可以cast成该interface `llvm::cast<TilingInterface>(op)`
-
-​	- getLoopIteratorTypes：每个元素为utils::IteratorType，表示为utils::IteratorType::parallel或utils::IteratorType::reduction
-
-​	- getIterationDomain：每个元素是一个Range
+- TilingInterface：对于有该interface的op可以cast成该interface `llvm::cast<TilingInterface>(op)`
+  - getLoopIteratorTypes：每个元素为utils::IteratorType，表示为utils::IteratorType::parallel或utils::IteratorType::reduction
+  - getIterationDomain：每个元素是一个Range，Range中有三个元素(offset,size,stride)，都是 OpFoldResult
 
 ```cpp
-if (auto intAttr = range.size.dyn_cast<Attribute>()) {
-	tileSize = std::min(setTileSize, intAttr.cast<IntegerAttr>().getInt());
+OpBuilder builder(op);
+TilingInterface tilingOp = mlir::cast<TilingInterface>(op);
+SmallVector<Range> loopRanges = tilingOp.getInterationDomain(builder);
+int64_t setTileSize = xxx; // 认为设置一个期望的 tile_size
+for (Range range : loopRanges) {
+  if (auto intAttr = mlir::dyn_cast<Attribute>(range.size)) {
+    tileSize = std::min(setTileSize, mlir::cast<IntegerAttr>(intAttr).getInt());
+  }
 }
 ```
 
@@ -5370,10 +5375,10 @@ if (auto intAttr = range.size.dyn_cast<Attribute>()) {
   - BlockArgument ：返回拥有这个blockarg的Block。 `getResultNumber`
 
 ```cpp
- 	// Try to get a memory effect interface for the parent operation.
-	Operation *op;
+  // Try to get a memory effect interface for the parent operation.
+ Operation *op;
   if (BlockArgument arg = dyn_cast<BlockArgument>(value))
-		// getParentOp会返回包含该block的最近Operation
+  // getParentOp会返回包含该block的最近Operation
     op = arg.getOwner()->getParentOp();
   else
     op = cast<OpResult>(value).getOwner();
@@ -5608,7 +5613,7 @@ llvm::find_if(shapeIndexs, [&](int64_t shapeIndex) {
         }
         newShapes.emplace_back(rewriter.getIndexAttr(shape.value()));
       }
-			rewriter.create<tensor::EmptyOp>(loc, newShapes, srcType.getElementType());
+   rewriter.create<tensor::EmptyOp>(loc, newShapes, srcType.getElementType());
 ```
 
 ### 判断输入是否为升序
@@ -5772,9 +5777,9 @@ void WrapDriver::processor(func::FuncOp funcOp) {
 
 
 namespace {
-	void runOnOperation() override {
-		WrapDriver driver;
+ void runOnOperation() override {
+  WrapDriver driver;
     driver.processor(getOperation());
-	}
+ }
 } // namespace
 ```
