@@ -570,6 +570,26 @@ bool cmp(int lhs, int rhs) {
 }
 ```
 
+3.LeetCode 108 将有序数组转换为二叉搜索树
+
+将左右树分开处理
+
+```cpp
+TreeNode *build(vector<int> &nums, int l, int r) {
+  if (l > r) return nullptr;
+  int m = (r - l) / 2 + l;
+  TreeNode *res = new TreeNode(nums[m]);
+  res->left = build(nums, l, m - 1);
+  res->right = build(nums, m + 1, r);
+  return res;
+}
+TreeNode *sortedArrayToBST(vector<int>& nums) {
+    int size = nums.size();
+    if (size == 0) return nullptr;
+    return build(nums, 0, size - 1);
+}
+```
+
 # 排序
 
 ## 基础模版
@@ -1124,5 +1144,76 @@ vector<int> sockCollocation(vector<int>& sockets) {
     else res2 ^= i;
   }
   return {res1, res2};
+}
+```
+
+# 模拟法
+
+leetcode43 字符串相乘
+
+```cpp
+string multiply(string num1, string num2) {
+    if (num1.size() == 0 || num2.size() == 0) return "";
+    if (num1 == "0" || num2 == "0") return "0";
+    vector<int> res(num1.size() + num2.size(), 0);
+    int offset = 0;
+    for (auto iter1 = num1.rbegin(); iter1 != num1.rend(); ++iter1) {
+        int val1 = *iter1 - '0';
+        int time1 = iter1 - num1.rbegin();
+        for (auto iter2 = num2.rbegin(); iter2 != num2.rend(); ++iter2) {
+            int val2 = *iter2 - '0';
+            auto time2 = iter2 - num2.rbegin();
+            int now = val1 * val2 + res[time1 + time2] + offset;
+            offset = now / 10;
+            res[time1 + time2] = now % 10;
+        }
+        res[time1 + num2.size()] = offset;
+        offset = 0;
+    }
+    string result;
+    auto iter = res.rbegin();
+    auto end = res.rend();
+    while (iter != end && *iter == 0) ++iter;
+    while (iter != end) {
+        result += std::to_string(*iter);
+        ++iter;
+    }
+    return result;
+}
+```
+
+Leetcode146 实现LRU
+
+```cpp
+class LRUCache {
+public:
+  LRUCache(int capacity) : capacity(capacity) {}
+  int get(int key) {
+    if (!cache.contains(key)) return -1;
+    // 把被访问的元素提前
+    auto iter = cache[key];
+    int res = (*iter).second;
+    values.push_front(*iter);
+    // 更新
+    values.earse(iter);
+    cache[key] = values.begin();
+    return res;
+  }
+  void put(int key, int value) {
+    if (cache.contains(key)) {
+      values.earse(cache[key]);
+    } else if (cache.size() == capacity) {
+      // 删掉该废弃的
+      cache.erase(values.back().first);
+      values.pop_back();
+    }
+    values.push_front(std::make_pair(key, value));
+    cache[key] = values.begin();
+  }
+
+private:
+  const int capacity;
+  unordered_map<int, list<std::pair<int, int>>::iterator> cache; // key, value的iter
+  list<std::pair<int, int>> values;
 }
 ```

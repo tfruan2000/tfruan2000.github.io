@@ -6,7 +6,9 @@ categories: [Triton]
 tags: [MLIR, Triton]
 ---
 
-从一个 MLIR Programer 的角度来读 Triton 源码。
+**本文将从一个 MLIR Programer 的角度来读 Triton 源码。因为是主要阅读源码，所以比较枯燥，请选择避坑～**
+
+最新版更新在：https://tfruan2000.github.io/posts/triton-pass/
 
 # 前言
 
@@ -193,6 +195,7 @@ nits：
 
 - 对于这种接口不会变动且类型确定的类型，可以直接用类名，用 `auto` 感觉代码可读性差一点
 - 因为担心break iterator而先收集operation再遍历会多引入空间和时间开销，不妨使用 `llvm::make_early_inc_range(block)`，笔者编译并测试过，不影响功能。
+  - [0904update]：我提了pr，已经merge了hhh
 
 ```cpp
 for (Region &region : op->getRegions()) {
@@ -438,6 +441,115 @@ if (auto splatOp = llvm::dyn_cast<SplatOp>(definingOp)) {
       rewriter, value, constAttr.getElementType(), loc);
 }
 ```
+
+## add_loop_unroll
+
+[0914update]：突然发现又在 ttir 层加了一个`createLoopUnrollPass`，补充一下。
+
+这个pass会匹配 `scf.for` op 上名为 `tt.loop_unroll_factor` 的 Attribute，这是个 `IntegerAttr`，默认设为1，作为 `unrollFactor` 。然后根据这个值去调用 mlir 官方的 [loopUnrollByFactor](https://github.com/llvm/llvm-project/blob/main/mlir/lib/Dialect/SCF/Utils/Utils.cpp#L375)。
+
+pass 结束后， for 循环会按照这个值展开，展开的行为是每`unrollFactor`次相邻的计算展开。 比如
+
+```text
+scf.for 0(lb) to 10(ub) step 1, (tt.loop_unroll_factor = 3)
+  ops
+->
+
+scf.for 0(lb) to 9(ub) step 3 // 每三个相邻的循环合并
+  ops
+  ops
+  ops
+scf.for 9(lb) to 10(ub) step 1 // 防止还有剩下的循环
+```
+
+以官方提供的例子来看，我们以 lb = 0, ub = 10(即%arg1), step = 2 为例
+
+```text
+// 小改一下，让func有返回值，这样可以跑canonicalize pass来fold掉一些arith计算。然后把 step 设为 2
+// triton-opt  -triton-loop-unroll test/Triton/loop-unroll.mlir --canonicalize
+tt.func @add_kernel_unroll(%arg0: tensor<256x!tt.ptr<f32>>, %arg1: i32) -> tensor<256xf32> {
+  %c1_i32 = arith.constant 1 : i32
+  %c2_i32 = arith.constant 2 : i32
+  %cst = arith.constant 0.000000e+00 : f32
+  %0 = tt.splat %c1_i32 : i32 -> tensor<256xi32>
+  %1 = tt.splat %cst : f32 -> tensor<256xf32>
+  // lb = 1, ub = 10, step = 2 (即1、3、5、7、9)
+  %2:2 = scf.for %arg3 = %c1_i32 to %arg1 step %c1_i32 iter_args(%arg4 = %1, %arg5 = %arg0) -> (tensor<256xf32>, tensor<256x!tt.ptr<f32>>)  : i32 {
+      %3 = tt.load %arg5 : tensor<256x!tt.ptr<f32>>
+    %4 = arith.addf %arg4, %3 : tensor<256xf32>
+    %5 = tt.addptr %arg5, %0 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
+    scf.yield %4, %5 : tensor<256xf32>, tensor<256x!tt.ptr<f32>>
+  } {tt.loop_unroll_factor = 3 : i32}
+  tt.return %2#0 : tensor<256xf32>
+}
+```
+
+unroll pass 结束后：
+
+```text
+//这里就简单记录下pass后的ir
+  %0 = arith.divui %arg1, %c2_i32 : i32 // 10 / 2 = 5
+  %1 = arith.remsi %0, %c3_i32 : i32    // 5 % 3 = 2
+  %2 = arith.subi %0, %1 : i32          // 5 - 2 = 3
+  %3 = arith.muli %2, %c2_i32 : i32     // 3 * 2 = 6
+  // lb = 1, ub = 7, step = 6 (即1、3、5次循环合并)
+  %5:2 = scf.for %arg2 = %c1_i32 to %4 step %c6_i32 iter_args(%arg3 = %cst_0, %arg4 = %arg0) -> (tensor<256xf32>, tensor<256x!tt.ptr<f32>>)  : i32 {
+  ...
+  // lb = 7, ub = 10, step = 2 (即7、9)
+  %6:2 = scf.for %arg2 = %4 to %arg1 step %c2_i32 iter_args(%arg3 = %5#0, %arg4 = %5#1) -> (tensor<256xf32>, tensor<256x!tt.ptr<f32>>)  : i32 {
+```
+
+unroll pass 对 scf.for 做了什么就到这了，让我们回到 mlir 官方的 [loopUnrollByFactor](https://github.com/llvm/llvm-project/blob/main/mlir/lib/Dialect/SCF/Utils/Utils.cpp#L375)，简单介绍一下。
+
+我们发现这段代码中其实将静态和动态的情况分开处理了，因为静态的情况下能分析出需不需要第二个循环来处理没有被处理完的数据。处理的流程也是一连串的 arith.op 来计算新的 for 中的 lb, ub, step，这就不展开讲。有一个用处很多的函数 `getConstantIntValue` 用来获得 `OpFoldResult` 中的真实值，这个挺好用的。
+
+```cpp
+// mlir/lib/Dialect/Utils/StaticValueUtils.cpp
+std::optional<int64_t> getConstantIntValue(OpFoldResult ofr) {
+  // Case 1: Check for Constant integer.
+  if (auto val = llvm::dyn_cast_if_present<Value>(ofr)) {
+    APSInt intVal;
+    if (matchPattern(val, m_ConstantInt(&intVal)))
+      return intVal.getSExtValue();
+    return std::nullopt;
+  }
+  // Case 2: Check for IntegerAttr.
+  Attribute attr = llvm::dyn_cast_if_present<Attribute>(ofr);
+  if (auto intAttr = dyn_cast_or_null<IntegerAttr>(attr))
+    return intAttr.getValue().getSExtValue();
+  return std::nullopt;
+}
+```
+
+思考：
+
+1.attr 的名称
+
+代码中写做下面的内容，用 `static const` 来修饰一个字符串，作为编译期的 hint。
+
+```cpp
+static const char *loopUnrollFactorAttrName = "tt.loop_unroll_factor";
+```
+
+在 mlir 中更常见的关于使用 string 作为编译 hint 的写法是 `static constexpr StringLiteral`(当然这无关紧要)
+
+```cpp
+static constexpr StringLiteral loopUnrollFactorAttrName("tt.loop_unroll_factor");
+```
+
+至于这么写有什么优点，我目前只了解使用字面量更节省内存，相比 `const` 强调不应该被修改， `constexpr` 更强调编译期不可变。
+
+更多这样的小细节欢迎收看我的 [mlir编程笔记](https://tfruan2000.github.io/posts/mlir-code-note/#llvm)。
+
+2.谁来给 `scf.for` 主动设置这个 attr
+
+`scf.for` 直接由 triton-lang 中的 for 循环下降而来。
+
+截止0914 triton仓库中的代码，我没有看到这个 `tt.loop_unroll_factor` attr 在下降流程中谁主动给挂到 op 上，笔者猜想应该是在写 triton-lang 的时候程序员直接加到 for 循环上的。
+
+3.为什么不支持affine.for
+
+在 mlir 中， affine.for 也支持了 unroll pattern，但目前在 triton 中并不会下降出 affine op(没有场景)，所以当前该pass的锚点是 `scf.for`。
 
 # ttir->ttgir
 
