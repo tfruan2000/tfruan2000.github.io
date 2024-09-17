@@ -71,7 +71,7 @@ int lengthOfLongestSubstring(string s) {
 }
 ```
 
-2.dLCR 183. 望远镜中最高的海拔
+2.LCR 183. 望远镜中最高的海拔
 
 heights[i] 表示对应位置的海拔高度，返回[k, k + limit] 窗口内的 heights[i] 的最大值
 
@@ -196,40 +196,7 @@ ListNode* trainningPlan(ListNode* l1, ListNode* l2) {
 }
 ```
 
-# 树
-
-## 层序遍历
-
-1. LCR 149. 彩灯装饰记录 I
-
-> 用 `queue` 实现层序遍历
-{: .prompt-info }
-
-一棵圣诞树记作根节点为 root 的二叉树，节点值为该位置装饰彩灯的颜色编号。请按照从 左 到 右 的顺序返回每一层彩灯编号。
-
-输入：root = [8,17,21,18,null,null,6]
-输出：[8,17,21,18,6]
-
-```cpp
-vector<int> decorateRecord(TreeNode* root) {
-    if (root == nullptr) return {};
-    vector<int> res;
-    std::queue<TreeNode *> q;
-    q.push(root);
-    while (!q.empty()) {
-        TreeNode* now = q.front();
-        q.pop();
-        if (now != nullptr) {
-            res.push_back(now->val);
-            q.push(now->left);
-            q.push(now->right);
-        }
-    }
-    return res;
-}
-```
-
-## 递归
+# 遍历
 
 ## 深度优先 DFS
 
@@ -288,13 +255,66 @@ vector<vector<int>> pathTarget(TreeNode* root, int target) {
 }
 ```
 
+相似题：LeetCode437. 路径总和 III
+
+不要求从root出发到叶子节点，只需要是从父到子
+
+```cpp
+int helper(TreeNode *curr, int target) {
+  if (curr == nullptr) return 0;
+  target -= curr->val;
+  int res = helper(curr->left, target) + helper(curr->right, target);
+  return target == 0 ? 1 + res : res;
+}
+int pathSum(TreeNode* root, int targetSum) {
+  if (root == nullptr) return 0;
+  return helper(root, targetSum) + pathSum(root->left, targetSum) + pathSum(root->right, targetSum);
+}
+```
+
+相似题：LeetCode124. 二叉树中的最大路径和，每个节点有且只能使用一次
+
+最初始的想法是先获得 preOrder，再使用滑动窗口，但是preOrder中相邻的元素不一定在树上有边的关系
+
+```cpp
+int res = INT_MIN;
+int dfs(TreeNode *curr) {
+  if (curr == nullptr) return 0;
+  int l = max(curr->left, 0);
+  int r = max(curr->right, 0);
+  res = max(res, l + r + curr->val);
+  return max(l + r) + curr->val; // 节点只能使用一次
+}
+int maxPathSum(TreeNode *root) {
+  if (root == nullptr) return 0;
+  dfs(root);
+  return res;
+}
+```
+
+3.LeetCode236. 二叉树的最近公共祖先
+
+找 p 和 q 在 root 中的最近公共祖先
+
+最简单的思想可以写一个dfs判断 p 和 q 分别在哪侧的子树上，但这样时间复杂度会高达 $O(n^2)$。换一种想法：往左右子树都找找
+
+```cpp
+TreeNode* lowestCommonAncestor(TreeNode* root, TreeNode* p, TreeNode* q) {
+  if (root == nullptr || root == p || root == q) return root;
+  if (p == nullptr) return q;
+  if (q == nullptr) return p;
+  auto parent1 = lowestCommonAncestor(root->left, p, q);
+  auto parent2 = lowestCommonAncestor(root->right, p, q);
+  if (parent1 && parent2) return root;
+  return parent1 != nullptr ? parent1 : parent2;
+}
+```
+
 ## 广度优化 BFS
 
-在树上表现为层序遍历
+层序遍历 即 广度优先搜索
 
-## 层序遍历
-
-1. LCR 149. 彩灯装饰记录 I
+1.LCR 149. 彩灯装饰记录 I
 
 > 用 `queue` 实现层序遍历
 {: .prompt-info }
@@ -320,6 +340,119 @@ vector<int> decorateRecord(TreeNode* root) {
         }
     }
     return res;
+}
+```
+
+2.LeetCode200. 岛屿数量
+
+```cpp
+int numIslands(vector<vector<char>>& grid) {
+  int m = grid.size();
+  if (m == 0) return 0;
+  int n = grid[0].size();
+  int res = 0;
+  queue<std::pair<int, int>> q;
+  vector<std::pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      if (grid[i][j] == '0')
+        continue;
+      ++res;
+      q.push({i, j});
+      grid[i][j] = '0';
+      while (!q.empty()) {
+        auto [x, y] = q.front();
+        q.pop();
+        for (auto [dx, dy] : directions) {
+          int nx = x + dx;
+          int ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= m || ny >=n || grid[nx][ny] == '0')
+            continue;
+          q.push({nx, ny});
+          grid[nx][ny] = '0';
+        }
+      }
+    }
+  }
+  return res;
+}
+```
+
+3.LeetCode994. 腐烂的橘子
+
+```cpp
+int orangesRotting(vector<vector<int>>& grid) {
+  int m = grid.size();
+  if (m == 0) return -1;
+  int n = grid[0].size();
+  int good = 0;
+  queue<std::pair<int, int>> bads;
+  for (int i = 0; i < m; ++i) {
+    for (int j =0; j < n; ++j) {
+      int val = grid[i][j];
+      if (val == 1) ++good;
+      else if (val == 2) bads.push({i, j});
+    }
+  }
+  int res = 0;
+  vector<std::pair<int, int>> directions = {{0, -1}, {0, 1}, {-1, 0}, {1, 0}};
+  while (!bads.empty() && good > 0) {
+    int size = bads.size(); // 每轮都把当前queue剩下的坏橘子访问一遍
+    for (int i = 0; i < size; ++i) {
+      auto [x, y] = bads.front();
+      bads.pop();
+      for (auto [dx, dy] : directions) {
+        int nx = x + dx;
+        int ny = y + dy;
+        if (nx < 0 || nx >= m || ny < 0 || ny >= n || grid[nx][ny] != 1)
+          continue;
+        grid[nx][ny] = 2;
+        bads.push({nx, ny});
+        --good;
+      }
+    }
+    ++res;
+  }
+  return good == 0 ? res : -1;
+}
+```
+
+4.LeetCode207. 课程表
+
+你这个学期必须选修 numCourses 门课程，记为 0 到 numCourses - 1 。
+
+在选修某些课程之前需要一些先修课程。 先修课程按数组 prerequisites 给出，其中 prerequisites[i] = [ai, bi] ，表示如果要学习课程 ai 则 必须 先学习课程  bi 。
+
+```cpp
+vector<int> visit;
+bool dfs(int v, vector<vector<int>> &g) {
+  if (g[v].size() == 0) return true;
+  if (visit[v] == -1) return true;
+  if (visit[v] == 1) return false;
+  visit[v] = 1; // 防止有环
+  auto needs = g[v];
+  for (int need : needs) {
+    bool res = dfs(need, g);
+    if (!res) return false;
+  }
+  visit[v] = -1;
+  return true;
+}
+bool canFinish(int numCourses, vector<vector<int>>& prerequisites) {
+  vector<vector<int>> g(numCourses);
+  visit = vector<int>(numCourses, 0);
+  for (auto it = prerequisites.begin(); it != prerequisites.end(); ++it) {
+    g[(*it)[0]].push_back((*it)[1]);
+  }
+  for (int i = 0; i < numCourses; ++i) {
+    vector<int> needs = g[i]; // 上当前课程的前置需求
+    if (needs.size() == 0) continue;
+    for (int need : needs) {
+      bool res = dfs(need, g); // 看 need 课程能不能上
+      if (!res) return false;
+    }
+  }
+  return true;
 }
 ```
 
@@ -405,6 +538,26 @@ Node* treeToDoublyList(Node* root) {
 }
 ```
 
+相似题：LeetCode 108 将有序数组转换为二叉搜索树
+
+将左右树分开处理，使用分治的思想
+
+```cpp
+TreeNode *build(vector<int> &nums, int l, int r) {
+  if (l > r) return nullptr;
+  int m = (r - l) / 2 + l;
+  TreeNode *res = new TreeNode(nums[m]);
+  res->left = build(nums, l, m - 1);
+  res->right = build(nums, m + 1, r);
+  return res;
+}
+TreeNode *sortedArrayToBST(vector<int>& nums) {
+    int size = nums.size();
+    if (size == 0) return nullptr;
+    return build(nums, 0, size - 1);
+}
+```
+
 2. LCR 174. 寻找二叉搜索树中的目标节点
 
 某公司组织架构以二叉搜索树形式记录，节点值为处于该职位的员工编号。请返回**第 cnt 大**的员工编号。（右根左）
@@ -438,44 +591,6 @@ void dfs(TreeNode *curr, int cnt) {
 ```
 
 # 分治与回溯
-
-## 回溯
-
-前进一步 + 函数 + 后退一步
-
-1.LCR 129. 字母迷宫
-
-字母迷宫游戏初始界面记作 m x n 二维字符串数组 grid，请判断玩家是否能在 grid 中找到目标单词 target。
-
-注意：寻找单词时 必须 按照字母顺序，通过水平或垂直方向相邻的单元格内的字母构成，同时，同一个单元格内的字母 不允许被重复使用 。
-
-```cpp
-bool trave(vector<vector<char>>& grid, string target, vector<vector<bool>> &visit, int i, int j, int idx) {
-  if (idx == target.size()) return true;
-  if (i < 0; || i == grid.size() || j < 0 || j == grid[0].size() || visit[i][j]) return false;
-  if (grid[i][j] != target[idx]) return false;
-  visit[i][j] = true; // 前进
-  if (trave(grid, target, visit, i + 1, j, idx) ||
-      trave(grid, target, visit, i - 1, j, idx) ||
-      trave(grid, target, visit, i, j + 1, idx) ||
-      trave(grid, target, visit, i, j - 1, idx))
-    return true;
-  visit[i][j] = false; // 回退
-  return false;
-}
-bool wordPuzzle(vector<vector<char>>& grid, string target) {
-    int m = grid.size();
-    int n = grid[0].size();
-    vector<bool> tmp(n, false);
-    vector<vector<bool>> visit(m, tmp);
-    for (int i = 0; i < m; ++i) { // 可以从任意位置开始
-        for (int j = 0; j < n; ++j) {
-            if (trave(grid, target, visit, i, j, 0)) return true;
-        }
-    }
-    return false;
-}
-```
 
 ## 分治
 
@@ -570,23 +685,120 @@ bool cmp(int lhs, int rhs) {
 }
 ```
 
-3.LeetCode 108 将有序数组转换为二叉搜索树
-
-将左右树分开处理
+3.LeetCode 105 从先序和中序遍历来构建树
 
 ```cpp
-TreeNode *build(vector<int> &nums, int l, int r) {
-  if (l > r) return nullptr;
-  int m = (r - l) / 2 + l;
-  TreeNode *res = new TreeNode(nums[m]);
-  res->left = build(nums, l, m - 1);
-  res->right = build(nums, m + 1, r);
+void build(vector<int> &preorder, int &idx, vector<int> &inorder, int l, int r, TreeNode* &curr) {
+  if (l < r || idx >= preorder.size()) return;
+  int val = preorder[idx++];
+  curr = new TreeNode(val);
+  if (l < r) {
+    auto iter= inorder.begin();
+    int mid = std::find(iter + l, iter + r + 1, val);
+    build(preorder, idx, inorder, l, mid - 1, curr->left);
+    build(preorder, idx, inorder, mid + 1, r, curr->right)
+  }
+}
+TreeNode* buildTree(vector<int>& preorder, vector<int>& inorder) {
+    int size = preorder.size();
+    if (size == 0) return nullptr;
+    TreeNode *res = nullptr;
+    int idx = 0;
+    build(preorder, idx, inorder, 0, size - 1, res);
+    return res;
+}
+```
+
+## 回溯
+
+前进一步 + 函数 + 后退一步
+
+1.LCR 129. 字母迷宫
+
+字母迷宫游戏初始界面记作 m x n 二维字符串数组 grid，请判断玩家是否能在 grid 中找到目标单词 target。
+
+注意：寻找单词时 必须 按照字母顺序，通过水平或垂直方向相邻的单元格内的字母构成，同时，同一个单元格内的字母 不允许被重复使用 。
+
+```cpp
+bool trave(vector<vector<char>>& grid, string target, vector<vector<bool>> &visit, int i, int j, int idx) {
+  if (idx == target.size()) return true;
+  if (i < 0; || i == grid.size() || j < 0 || j == grid[0].size() || visit[i][j]) return false;
+  if (grid[i][j] != target[idx]) return false;
+  visit[i][j] = true; // 前进
+  if (trave(grid, target, visit, i + 1, j, idx) ||
+      trave(grid, target, visit, i - 1, j, idx) ||
+      trave(grid, target, visit, i, j + 1, idx) ||
+      trave(grid, target, visit, i, j - 1, idx))
+    return true;
+  visit[i][j] = false; // 回退
+  return false;
+}
+bool wordPuzzle(vector<vector<char>>& grid, string target) {
+    int m = grid.size();
+    int n = grid[0].size();
+    vector<bool> tmp(n, false);
+    vector<vector<bool>> visit(m, tmp);
+    for (int i = 0; i < m; ++i) { // 可以从任意位置开始
+        for (int j = 0; j < n; ++j) {
+            if (trave(grid, target, visit, i, j, 0)) return true;
+        }
+    }
+    return false;
+}
+```
+
+2.LeetCode46. 全排列
+
+```cpp
+int size;
+vector<bool> visit;
+vector<int> tmp;
+vector<vector<int>> res;
+void trave(vector<int>& nums) {
+  for (int i = 0; i < size; ++i) {
+    if (visit[i]) continue;
+    tmp.push_back(nums[i]);
+    visit[i] = true;
+    trave(nums);
+    tmp.pop_back();
+    visit[i] = false;
+  }
+  if (tmp.size() == size) {
+    res.push_back(tmp);
+  }
+}
+vector<vector<int>> permute(vector<int>& nums) {
+  size = nums.size();
+  if (size == 0) return {};
+  if (size == 1) return {nums};
+  visit = vector<bool>(size, false);
+  trave(nums);
   return res;
 }
-TreeNode *sortedArrayToBST(vector<int>& nums) {
-    int size = nums.size();
-    if (size == 0) return nullptr;
-    return build(nums, 0, size - 1);
+```
+
+3.LeetCode78. 子集
+
+```cpp
+int size;
+vector<int> tmp;
+vector<vector<int>> res;
+void trave(vector<int> &nums, int begin) {
+  if (begin > size) return;
+  for (int i = begin; i < size; ++i) {
+    tmp.push_back(nums[i]);
+    res.push_back(tmp);
+    trave(nums, i + 1);
+    tmp.pop_back();
+  }
+}
+vector<vector<int>> subsets(vector<int>& nums) {
+  size = nums.size();
+  if (size == 0) return {};
+  if (size == 1) return {nums, {}};
+  trave(nums, 0);
+  res.push_back({});
+  return {};
 }
 ```
 
@@ -1147,9 +1359,9 @@ vector<int> sockCollocation(vector<int>& sockets) {
 }
 ```
 
-# 模拟法
+# 模拟法 / 设计
 
-leetcode43 字符串相乘
+1.leetcode43 字符串相乘
 
 ```cpp
 string multiply(string num1, string num2) {
@@ -1182,7 +1394,7 @@ string multiply(string num1, string num2) {
 }
 ```
 
-Leetcode146 实现LRU
+2.Leetcode146 实现LRU
 
 ```cpp
 class LRUCache {
@@ -1216,4 +1428,90 @@ private:
   unordered_map<int, list<std::pair<int, int>>::iterator> cache; // key, value的iter
   list<std::pair<int, int>> values;
 }
+```
+
+```cpp
+using CacheValues = std::list<std::pair<int, int>>;
+class LRUCache {
+public:
+  LRUCache(int capacity) : capacity(capacity) {}
+  int get(int key) {
+    if (!cache.contains(key)) return -1;
+    auto iter = cache[key];
+    auto val = *iter;
+    values.push_front(val);
+    values.erase(iter);
+    cache[key] = values.begin();
+    return val.second;
+  }
+  void put(int key, int value) {
+    if (cache.contains(key)) {
+      values.erase(cache[key]);
+    } else if (values.size() == capacity) {
+      cache.erase(values.back().first);
+      values.pop_back();
+    }
+    values.push_front({key, value});
+    cache[key] = values.begin();
+  }
+
+private:
+  const int capacity;
+  unordered_map<int, CacheValues::iterator> cache; // key, value iter
+  CacheValues values;
+};
+
+2.LeetCode208. 实现 Trie (前缀树)
+
+```cpp
+class TrieNode {
+public:
+  bool isWord;
+  vector<TrieNode*> childs; // 26个字母
+  TrieNode() : isWord(false), childs(26, nullptr) {}
+};
+class Trie {
+public:
+    Trie() {root = new TrieNode;}
+
+    void insert(string word) {
+      int size = word.size();
+      if (size == 0) return;
+      auto curr = root;
+      for (int i = 0; i < size; ++i) {
+        int idx = word[i] - 'a';
+        if (curr->childs[idx] == nullptr) {
+          curr->childs[idx] = new TrieNode;
+        }
+        curr = curr->childs[idx];
+      }
+      curr->isWord = true;
+    }
+
+    bool search(string word) {
+      int size = word.size();
+      if (size == 0) return true;
+      auto curr = root;
+      for (int i = 0; i < size; ++i) {
+        int idx = word[i] - 'a';
+        if (curr->childs[idx] == nullptr) return false;
+        curr = curr->childs[idx];
+      }
+      return curr->isWord;
+    }
+
+    bool startsWith(string prefix) {
+      int size = prefix.size();
+      if (size == 0) return true;
+      auto curr = root;
+      for (int i = 0; i < size; ++i) {
+        int idx = prefix[i] - 'a';
+        if (curr->childs[idx] == nullptr) return false;
+        curr = curr->childs[idx];
+      }
+      return true;
+    }
+private:
+    TrieNode *root;
+};
 ```

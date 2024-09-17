@@ -3412,7 +3412,7 @@ size_t mlir::moveLoopInvariantCode(LoopLikeOpInterface loopLike) {
 
 StringRef **没有存储在其中数据的所有权** 的 string，可以是 constant 也可以是 dynamic，想要存储一个 StringRef 往往是不安全的。(因为data的真实memory可能随时被修改)
 
-但也因为如此， StringRef 十分轻量。
+但也因为如此， StringRef 十分轻量，避免了 `const char*` 这类的在堆上开辟空间。
 
 > This class does not own the string data.
 > The start of the string, in an external buffer. `const char *Data = nullptr;`

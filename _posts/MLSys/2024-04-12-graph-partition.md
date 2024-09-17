@@ -24,13 +24,18 @@ tags: [MLSys, Graph Partition]
 
 手写一些融合的pattern，例如：`conv2d + relu`，`conv2d + bn + relu`，`conv2d + bn + relu + pool`等，常见让计算密集型和访存密集型算子融合，减小整体执行开销。针对特定场景有较好的收益，但泛化性较差（总不能手动枚举所有优化可能吧，总得编译时间和性能trade-off）
 
+主要分为以下两步：
+
+- 识别算子组合，针对算子子图手工实现对应融合算子
+- 将融合算子注册到AI框架，在AI框架中增加对应的优化pass，将匹配的算子子图替换为融合算子节点
+
 > 推荐两篇讲访存和计算的知乎文章：<https://zhuanlan.zhihu.com/p/600489819>, <https://zhuanlan.zhihu.com/p/688613416>
 
 ### XLA
 
 XLA的op fusion是在HLO IR层做的，相关代码见[fusion_pipeline.cc](https://github.com/openxla/xla/blob/main/xla/service/gpu/fusion_pipeline.cc)。
 
-- PriorityFusion: 实现了FusionQueue，queue中都是producer。根据cost model来fuse instructions，并且通过动态地更新优先级（benefit最大）来选择下一个fusion对象。
+- PriorityFusion: 实现了FusionQueue，queue中都是producer。根据cost model来fuse instructions，并且通过**动态地更新优先级**（benefit最大）来选择下一个fusion对象。
 
 - InstructionFusion: 纵向fusion，将从producer到consumer的所有指令融合为一个kernel。
 

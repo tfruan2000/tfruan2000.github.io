@@ -555,7 +555,7 @@ static constexpr StringLiteral loopUnrollFactorAttrName("tt.loop_unroll_factor")
 
 ## add_convert_to_ttgpuir
 
-`createConvertTritonToTritonGPUPass`
+`createConvertTritonToTritonGPUPass`：将 ttir 转为 triton gpu ir，需要使用来自 kernel 的 `numWarps`, `threadsPerWarp`, `numCTAs` 参数，这些信息会随着 `TritonGPUTypeConverter` 在 conversion 的过程中被用到。
 
 > 先介绍各种 layout
 
