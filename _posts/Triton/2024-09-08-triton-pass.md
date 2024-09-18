@@ -359,7 +359,7 @@ offsets + shapes -> 得到真实的 offsets
 
 其实可以有更多的这类 pattern，例如支持 cond 是 mask 的一个 extract，且 mask 一定是一个 dense value(splat from i1, broadcast from all unit-dims tensor)，所以我尝试提交了一个 [PR](https://github.com/triton-lang/triton/pull/4673)，以支持更多场景。
 
-- `torch.sum(x[:,:,None].expand(-1,-1,n) * y[None,:,:].expand(m,-1,-1),1) => dot(x,y,splat(0))`
+- `sum(x[:,:,None].expand(-1,-1,n) * y[None,:,:].expand(m,-1,-1),1) => dot(x,y,splat(0))`
 
 这个pattern会将特殊情况下的`expand_dim + broadcast + mul + reducesum` 给转为 `tt.dot`，本质上其实是 expand 出的 dim 其实是 reducesum 的 parallel 轴，并不影响 reduction 轴计算结果。（感觉也能改成适用更多case，但我还没想到。）
 

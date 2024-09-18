@@ -53,9 +53,11 @@ triton 的[组成](https://github.com/triton-lang/triton/tree/main/python/triton
 
 以 nvgpu 为例，triton-lang 的下降流程：
 
-triton-lang -> triton dialect -> triton gpu dialect -> nvgpu dialect -> llvm ir + nvvm ir -> ptx
+triton-lang -> triton dialect -> triton gpu dialect -> nvgpu dialect -> llvm ir + nvvm ir -> ptx -> cnbin
 
 ![triton_arch_now](/assets/img/blog/img_triton_survey/triton_arch_now.png)
+
+triton-lang(python) -> ast -> ttir：遍历整个语法树，通过code_generator相关代码，定义visit_Assign等函数，通过mlir builder生成对应的mlir。
 
 compiler支持多后端的方向：通过Linalg dialect
 
@@ -69,7 +71,85 @@ compiler支持多后端的方向：通过Linalg dialect
 
 编译流程中，首先会将 `jit` 修饰的 kernel 给打包成一个 `JITFunction`，见 [runtime/jit.py](https://github.com/triton-lang/triton/blob/main/python/triton/runtime/jit.py#L824)。
 
-> `@triton.jit` 中还可以传一个参数 `do_not_specialize`，来阻止 triton 生成过多的 kernel。 triton jit 会以每一个非指针参数为准，去生成一个kernel，比如某一个参数运行时取值可能为1或0，那么 triton 就会为它们各生成一个。
+```python
+def jit(
+    fn: Optional[T] = None,
+    *,
+    version=None,
+    repr: Optional[Callable] = None,
+    launch_metadata: Optional[Callable] = None,
+    do_not_specialize: Optional[Iterable[int]] = None,
+    do_not_specialize_on_alignment: Optional[Iterable[int]] = None,
+    debug: Optional[bool] = None,
+    noinline: Optional[bool] = None,
+) -> Union[JITFunction[T], Callable[[T], JITFunction[T]]]:
+    def decorator(fn: T) -> JITFunction[T]:
+        assert callable(fn)
+        if os.getenv("TRITON_INTERPRET", "0") == "1":
+            from .interpreter import InterpretedFunction
+            return InterpretedFunction(fn) # 使用Interpreter执行，完全不会走到任何编译流程，使用numpy&torch api 封装
+        else:
+            return JITFunction(
+                fn,
+                version=version,
+                do_not_specialize=do_not_specialize,
+                debug=debug,
+                noinline=noinline,
+                repr=repr,
+                launch_metadata=launch_metadata,
+            ) # 编译
+```
+
+> `@triton.jit` 的 `do_not_specialize` 参数，来阻止 triton 生成过多的 kernel。
+> triton jit 会以每一个非指针参数为准，去生成一个kernel，比如某一个参数运行时取值可能为1或0，那么 triton 就会为它们各生成一个。
+
+`JITFunction` 对象继承自 `KernelInterface`，并封装了一些调用语法糖。
+
+```python
+# python/triton/runtime/jit.py
+class KernelInterface(Generic[T]):
+    run: T
+
+    def __getitem__(self, grid) -> T:
+        """
+        A JIT function is launched with: fn[grid](*args, **kwargs).
+        Hence JITFunction.__getitem__ returns a callable proxy that
+        memorizes the grid.
+        """
+        return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+
+class JITFunction(KernelInterface[T]):
+    cache_hook = None
+    ...
+    def run(self, *args, grid, warmup, **kwargs):
+        ...
+        key = ''.join(sig_and_spec) + str((constexpr_vals, excess_kwargs))
+        kernel = self.cache[device].get(key, None)
+
+        if kernel is None:
+            # Kernel is not cached; we have to compile.
+            ...
+            src = self.ASTSource(self, signature, constants, configs[0]) # ast 转 ttir
+            kernel = self.compile( # ttir 一路下降到 cnbin
+                src,
+                target=target,
+                options=options.__dict__,
+            )
+            ...
+        if not warmup:
+            ...
+            kernel.run(...) # 调用 drive api执行cnbin
+```
+
+`lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)`：将grid参数封装传入进去, 除了定义的kernel参数外，还会额外传入num_wraps， stages, stream等参数。
+
+```python
+# 人为写出的kernel调用
+add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
+
+# 真实的kernel调用
+add_kernel(x.data_ptr, y.data_ptr, output, n_elements, BLOCK_SIZE=1024, grid, num_warps=4, num_stages=3, extern_libs=None, stream=None, warmup=False)
+```
 
 ### auto-tuning
 
@@ -103,7 +183,7 @@ compiler支持多后端的方向：通过Linalg dialect
 )
 ```
 
-当前**要求所有BLOCK_SIZE设置的值都得是2次幂**
+当前**要求所有BLOCK_SIZE设置的值都得是2次幂**，因为在gpu上数据为2次冪的规模时性能更好。
 
 ```python
 n_rows, n_cols = x.shape
@@ -116,9 +196,7 @@ BLOCK_SIZE = triton.next_power_of_2(n_cols)
 
 triton 是 jit 的执行模式，但为了减少编译时间，其实会保留每次编译得到的 kernel，所以真实的编译流程是：
 
-1.根据 kernel 信息生成一个 `metadata_filename`(一个 json 文件)，然后在cache目录中查找 `.so`
-
-> 由 `jit` 产生的cache： 根据 kernel 源代码和参数的哈希值进行缓存
+1.根据 kernel 信息生成一个 `metadata_filename`(一个 json 文件)，然后在cache目录中查找
 
 ```python
     if not always_compile and metadata_path is not None:
@@ -138,11 +216,6 @@ python->ast->ttir->...
 - `sig_and_spec`： 函数名 和 参数类型，直接表现在 kernel 上。当参数类型很多的时候也可以使用 `do_not_specialize` 来排除掉某些参数的影响，来避免生成更多的 kernel。
 - `constexpr_vals`： 标记为 `tl.constexpr` 的参数
 - `excess_kwargs`：`num_stages`, `num_warps`, `num_stages` 等
-
-**tuning config(条例不同)** 产生的 cache 和 **jit(kernel参数不同)** 产生的 cache 是两种cache。
-
-- 来自 `tuning config`：保存调优时性能最好的配置
-- 来自 `jit`：避免重复编译
 
 ## backend
 

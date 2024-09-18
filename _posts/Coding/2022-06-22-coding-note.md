@@ -352,7 +352,11 @@ int numIslands(vector<vector<char>>& grid) {
   int n = grid[0].size();
   int res = 0;
   queue<std::pair<int, int>> q;
-  vector<std::pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+  vector<std::pair<int, int>> directions;
+  directions.push_back({-1, 0});
+  directions.push_back({1, 0});
+  directions.push_back({0, -1});
+  directions.push_back({0, 1});
   for (int i = 0; i < m; ++i) {
     for (int j = 0; j < n; ++j) {
       if (grid[i][j] == '0')
@@ -395,7 +399,11 @@ int orangesRotting(vector<vector<int>>& grid) {
     }
   }
   int res = 0;
-  vector<std::pair<int, int>> directions = {{0, -1}, {0, 1}, {-1, 0}, {1, 0}};
+  vector<std::pair<int, int>> directions;
+  directions.push_back({-1, 0});
+  directions.push_back({1, 0});
+  directions.push_back({0, -1});
+  directions.push_back({0, 1});
   while (!bads.empty() && good > 0) {
     int size = bads.size(); // 每轮都把当前queue剩下的坏橘子访问一遍
     for (int i = 0; i < size; ++i) {
