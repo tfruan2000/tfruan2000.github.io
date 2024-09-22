@@ -3423,6 +3423,8 @@ StringRef **没有存储在其中数据的所有权** 的 string，可以是 con
 static constexpr StringLiteral xxxAttrName = "............";
 ```
 
+等效于 `static const char *const`
+
 ## make_range
 
 1.llvm::map_range

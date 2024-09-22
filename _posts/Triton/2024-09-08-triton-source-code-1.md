@@ -1,5 +1,5 @@
 ---
-title: OpenAI Triton 源码走读
+title: OpenAI Triton 源码走读[ttir pass]
 author: tfruan
 date: 2024-09-08 12:00:00 +0800
 categories: [Triton]
@@ -7,8 +7,6 @@ tags: [MLIR, Triton]
 ---
 
 **本文将从一个 MLIR Programer 的角度来读 Triton 源码。因为是主要阅读源码，所以比较枯燥，请选择避坑～**
-
-最新版更新在：https://tfruan2000.github.io/posts/triton-pass/
 
 # 前言
 
@@ -550,13 +548,5 @@ static constexpr StringLiteral loopUnrollFactorAttrName("tt.loop_unroll_factor")
 3.为什么不支持affine.for
 
 在 mlir 中， affine.for 也支持了 unroll pattern，但目前在 triton 中并不会下降出 affine op(没有场景)，所以当前该pass的锚点是 `scf.for`。
-
-# ttir->ttgir
-
-## add_convert_to_ttgpuir
-
-`createConvertTritonToTritonGPUPass`：将 ttir 转为 triton gpu ir，需要使用来自 kernel 的 `numWarps`, `threadsPerWarp`, `numCTAs` 参数，这些信息会随着 `TritonGPUTypeConverter` 在 conversion 的过程中被用到。
-
-> 先介绍各种 layout
 
 TBC

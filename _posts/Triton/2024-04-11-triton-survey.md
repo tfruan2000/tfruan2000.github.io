@@ -8,6 +8,78 @@ tags: [Triton, Survey]
 
 # background
 
+triton 是 **使用 Python 来写 cuda** + **block内的优化交给 compiler**
+
+## numba
+
+对比和triton类似的解决方案 [numba](https://numba.pydata.org/)
+
+```python
+BLOCK = 512
+
+# This is a GPU kernel in Numba.
+@jit
+def add(X, Y, Z, N):
+   # In Numba/CUDA, each kernel
+   # instance itself uses an SIMT execution
+   # threadId 很重要
+   tid = threadIdx.x
+   bid = blockIdx.x
+   # scalar index
+   idx = bid * BLOCK + tid
+   if id < N:
+     # There is no pointer in Numba.
+     # Z,X,Y are dense tensors
+     Z[idx] = X[idx] + Y[idx]
+
+...
+grid = (ceil_div(N, BLOCK),)
+block = (BLOCK,)
+add[grid, block](x, y, z, x.shape[0])
+```
+
+numba特点：
+
+- 显式控制 launch 行为(grid, block)，和 cuda 几乎一致
+- 编程范式
+  - 输入为 tensor
+  - SIMT 行为，控制每个 thread 的行为
+- 和 cuda 强耦合，支持多 backend 困难
+
+## triton
+
+```python
+BLOCK = 512
+
+# This is a GPU kernel in Triton.
+@jit
+def add(X, Y, Z, N):
+   # 操作和 threadId 无关
+   pid = program_id(0)
+   # block of indices
+   idx = pid * BLOCK + arange(BLOCK)
+   mask = idx < N
+   # Triton 使用指针
+   x = load(X + idx, mask=mask)
+   y = load(Y + idx, mask=mask)
+   store(Z + idx, x + y, mask=mask)
+
+
+...
+grid = (ceil_div(N, BLOCK),)
+# no thread-block
+add[grid](x, y, z, x.shape[0])
+```
+
+triton 特点：
+
+- 只定义 grid 信息， thread block内的行为由算法定义
+- CTA 内的 wrap 数量可通过 tuning config 配置
+- 算法范式
+  - 输入数据一般为标量和 tensor指针
+  - SPMD
+  - 屏蔽内存层级管理
+
 ## cuda vs triton
 
 cuda和triton编程模式对比
@@ -32,7 +104,47 @@ OpenAI [Triton](https://github.com/triton-lang/triton/tree/main) 是什么？这
 - 理解triton语法的repo：[triton-puzzles](https://github.com/srush/Triton-Puzzles)
 - 很多用triton实现的kernel的repo：[lightllm](https://github.com/ModelTC/lightllm)
 
-# 组成
+# triton 开发流程
+
+op define + launch function + call
+
+代码来源： [tutorials/01-vector-add.py](https://github.com/triton-lang/triton/blob/main/python/tutorials/01-vector-add.py)
+
+- op define
+
+使用 `@triton.jit` 修饰的 kernel 算法
+
+```python
+@triton.jit
+def add_kernel(
+    x_ptr,  # *Pointer* to first input vector
+    y_ptr,  # *Pointer* to second input vector
+    ...
+```
+
+- launch function
+
+```python
+def add(x: torch.Tensor, y: torch.Tensor):
+    output = torch.empty_like(x)
+    assert x.is_cuda and y.is_cuda and output.is_cuda
+    n_elements = output.numel()
+    grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+    add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
+    return output
+```
+
+- call
+
+```python
+torch.manual_seed(0)
+size = 98432
+x = torch.rand(size, device='cuda')
+y = torch.rand(size, device='cuda')
+output_triton = add(x, y)
+```
+
+# triton 组成
 
 triton 的[组成](https://github.com/triton-lang/triton/tree/main/python/triton)：
 
@@ -217,13 +329,15 @@ python->ast->ttir->...
 - `constexpr_vals`： 标记为 `tl.constexpr` 的参数
 - `excess_kwargs`：`num_stages`, `num_warps`, `num_stages` 等
 
+缓存 `auto-tuning` 中性能最好的 config 生成的 kernel。
+
 ## backend
 
 ### launch
 
 由于每个 kernel 的参数可能不同，所以需要为其生成不同的执行函数，会使用 kernel 的一些信息和[固定的代码拼接](https://github.com/triton-lang/triton/blob/main/third_party/nvidia/backend/driver.py#L147)。最终变成一个可以调以调用的接口。
 
-# elements
+# triton-lang elements
 
 这里只是简单介绍下，举个🌰，vector add
 
@@ -399,6 +513,16 @@ Blocked Layout只是一种Pattern，但**按照这个Pattern会多次访问，�
 
 compiler在软件流水时使用。软件流水优化一般会在kernel中插入循环，以实现对一个 `BLOCK_SIZE` 的数据进行分段计算
 
+# IR
+
+triton python 语言是python的一个子集，它通过ast 模块解析python代码，生成一个python 语法树。
+
+![AST](/assets/img/blog/img_triton_survey/ast.png)
+
+遍历整个语法树的过程，通过code_generator相关代码，定义visit_Assign等函数，通过mlir builder生成对应的mlir(ttir)。然后ttir继续走 mlir pipeline继续下降。
+
+![dialect](/assets/img/blog/img_mlir_gpu_pipeline_component/nvvm_dialect_ir.png)
+
 ## layout
 
 Layout：定义了Data是如何被Thread处理。这种layout attr在lowering过程中被传递，用于描述op的拆分映射关系
@@ -442,7 +566,7 @@ Distributed encodings have a layout function that is entirely characterized by a
 
 ![distribute_layout](/assets/img/blog/img_triton_survey/distribute_layout.png)
 
-### block layout
+#### block layout
 
 最常见的 layout，包含了配合 AxisInfoAnalysis 分析获得 load 和 store 的访存行为，以用来访存合并。
 
@@ -475,6 +599,10 @@ memory-coalesce 后将会生成下面的 Layout(第二维连续更长，所以or
 #blocked_after = #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [2, 16], warpsPerCTA = [4, 1], order = [1, 0]}>
 ```
 
+#### MMA Layout 和 DotOperand Layout
+
+用来指导 op 下降到特殊指令的 attr。
+
 ### shared layout
 
 In order to **avoid shared memory bank conflicts**, elements may be **swizzled** in memory.
@@ -482,10 +610,6 @@ In order to **avoid shared memory bank conflicts**, elements may be **swizzled
 同一个warp内的thread同时访问同一列的数据会产生 bank 冲突，对数据进行 swizzle，调整相关的存储位置，保证 thread 访问时不出现 bank conflict。
 
 ![swizzled memory](/assets/img/blog/img_triton_survey/swizzled.png)
-
-### MMA Layout 和 DotOperand Layout
-
-用来指导 op 下降到特殊指令的 attr。
 
 # trick
 
@@ -498,6 +622,14 @@ dumps the IR before every MLIR pass Triton runs
 - `TRITON_PRINT_AUTOTUNING=1`
 
 打印每次选择的 config
+
+- `TRITON_INTERPRET=1`
+
+适用numpy解释执行，直接变成一个cpu kernel，用来验证算法的准确性。
+
+- `TRITON_PRINT_AUTOTUNING=1`
+
+打印每次 tuning 中的最优 tuning config 和 耗时。
 
 ## 打印pass前后ir
 
