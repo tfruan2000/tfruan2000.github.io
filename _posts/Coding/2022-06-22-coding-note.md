@@ -810,6 +810,31 @@ vector<vector<int>> subsets(vector<int>& nums) {
 }
 ```
 
+4.LeetCode39. 组合总和
+
+```cpp
+vector<vector<int>> res;
+vector<int> tmp;
+void dfs(vector<int> &candidants, int begin, int target, int curr) {
+  if (target == curr) {
+    res.push_back(tmp);
+    return;
+  }
+  if (target < curr || begin >= candidants.size()) return;
+  for (int i = begin; i < candidants.size(); ++i) {
+    int val = candidants[i];
+    if (curr + val > target) break;
+    tmp.push_back(val);
+    dfs(candidants, i, target, curr + val); // 可以重复使用当前元素
+    tmp.pop_back();
+  }
+}
+vector<vector<int>> combinationSum(vector<int>& candidates, int target) {
+  sort(candidates.begin(), candidates.end());
+  dfs(candidants, 0, target, 0);
+}
+```
+
 # 排序
 
 ## 基础模版

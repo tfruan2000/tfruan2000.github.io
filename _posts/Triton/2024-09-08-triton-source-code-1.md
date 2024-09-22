@@ -379,7 +379,7 @@ tt.func @test_combine_broadcast_mul_reducesum(%lhs: tensor<128x64xf32>, %rhs: te
 }
 ->
     %cst = arith.constant dense<0.000000e+00> : tensor<128x128xf32>
-    %0 = tt.dot %arg0, %arg1, %cst, inputPrecision = tf32 : tensor<128x64xf32> * tensor<64x128xf32> -> tensor<128x128xf32>
+    %0 = tt.dot %lhs, %rhs, %cst, inputPrecision = tf32 : tensor<128x64xf32> * tensor<64x128xf32> -> tensor<128x128xf32>
     tt.return %0 : tensor<128x128xf32>
 ```
 

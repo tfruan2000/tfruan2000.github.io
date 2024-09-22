@@ -321,6 +321,21 @@ triton 是 jit 的执行模式，但为了减少编译时间，其实会保留�
 
 python->ast->ttir->...
 
+```python
+├── 1e888eeebd0dc80dd6656c3193fb8376020f69d0e3b0b3f8a540f22c12357303
+│   ├── _attn_fwd.cubin
+│   ├── _attn_fwd.json
+│   ├── _attn_fwd.llir
+│   ├── _attn_fwd.ptx
+│   ├── _attn_fwd.ttgir
+│   ├── _attn_fwd.ttir
+│   └── __grp___attn_fwd.json
+├── 41ce1f58e0a8aa9865e66b90d58b3307bb64c5a006830e49543444faf56202fc
+│   └── cuda_utils.so
+└── 72d7b51280ef4fc8848331fd56d843a8a4deab4657a8767807c06728dbc23691
+    └── __triton_launcher.so
+```
+
 3.某个op多次执行，什么时候会hit cache，什么时候需要重新编译呢？
 
 这需要从 triton 何时会产生一个新 cache 讲起。 triton 会以 [key](https://github.com/triton-lang/triton/blob/main/python/triton/runtime/jit.py#L616) 为核心，key 包含 `sig_and_spec`, `constexpr_vals` 和 `excess_kwargs`。
