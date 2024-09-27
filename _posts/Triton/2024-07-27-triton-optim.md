@@ -514,6 +514,7 @@ class LayerNorm(torch.autograd.Function):
 - `tl.max(a, 0.0)` 可以换成 `tl.where(a > 0, a, 0.0)`
 - `x` 和 `y` 在 `tl.load` 时用了mask，随后的 `tl.where(mask, x - y, 0.0)` 可以删除
 - 大规模 `reduce(10000->1)` -> 多级 `reduce(10000->100->1)`
+- 把低维reduction转为高维reduction(高维取数的连续性会更好)
 - ...
 
 ## 人为hint

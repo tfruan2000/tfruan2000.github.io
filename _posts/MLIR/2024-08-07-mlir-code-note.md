@@ -5230,8 +5230,9 @@ mlir/lib/Dialect/Linalg/TransformOps/LinalgTransformOps.cpp
 常见op（详细请学习[https://mlir.llvm.org/docs/Dialects/Transform/](https://mlir.llvm.org/docs/Dialects/Transform/)）
 
 - transform.structured.match
-其他transform ir使用前一般都要先match
-ir中可能包含多个同名op，所以opIndexing来锁定handle
+
+其他transform ir使用前一般都要先match。
+ir中可能包含多个同名op，所以可以通过opIndexing来锁定handle。
 
 - transform.structured.tile_reduction_using_for
 

@@ -526,7 +526,271 @@ Blocked Layout只是一种Pattern，但**按照这个Pattern会多次访问，�
 
 ## num_stages
 
-compiler在软件流水时使用。软件流水优化一般会在kernel中插入循环，以实现对一个 `BLOCK_SIZE` 的数据进行分段计算
+控制软件流水展开级数
+
+triton中的流水位于[TritonGPU/Transforms/Pipeliner](https://github.com/triton-lang/triton/tree/main/lib/Dialect/TritonGPU/Transforms/Pipeliner)。
+
+Triton 中并不需要很复杂的软件流水
+
+- grid一般写成(M/BLOCK_SIZE, 1, 1)，每个job内的数据量较小
+- SM中的 warp-schedule 起到了一些流水的效果：当warp执行一个long-latency的指令时，会通过切换warp掩盖指令开销
+- NV在新架构中引入了 `cp.async` 指令，gdram -> shared memory 的拷贝可以通过DMA异步进行 -> 所以需要软件流水来优化load的行为，让循环内的load尽量可以异步
+
+-> 只需要考虑load情况，计算和访存流水靠warp scheduler这一层来处理
+
+一个matmul的计算表示ir
+
+```text
+scf.for %arg0 = %c0 to %size step %c1 {
+    load.sync A & B
+    dot A, B
+}
+```
+
+当num_stagses = 2的时候，相当于会提前加载一个iter的数据，也就是变成如下代码:
+
+```text
+load.async A0, B0
+async_wait
+scf.for %arg0 = %c1 to %size-1 step %c1 { %arg0=A0, %arg1=B0 }{
+    dot arg0, arg1
+    addptr Anext, Bnext
+    load.async Anext, Bnext
+    async_wait
+}
+async_wait
+```
+
+流水中使用的一些ir
+
+- triton_gpu.alloc_tensor : tensor<128x32xf32, #share> 申请shared memory
+- triton_gpu.insert_slice_async %src, %dst, %index ： tensor<128x32x!tt.ptr<f32>> → tensor<128x32xf32, #share> 底层对应的cp.async指令
+  - %src: 数据地址，也就是tensor<128x32x!tt.ptr<f32>>
+  - %dst: 申请的shared memory
+  - %index: 从src加载的数据插入到%dst的目标索引
+- triton_gpu.async_commit_group 底层对应的 cp.async.commit_group 指令，就是将前面的所有 cp.async 指令打包到一起执行
+- triton_gpu.async_wait {num} 底层对应的 cp.async.wait_group 指令，也就是等待前面 num 个 cp.async-groups 执行完
+
+# trick
+
+## 不同的环境变量
+
+- `MLIR_ENABLE_DUMP=1`
+
+dumps the IR before every MLIR pass Triton runs
+
+- `TRITON_PRINT_AUTOTUNING=1`
+
+打印每次选择的 config
+
+- `TRITON_INTERPRET=1`
+
+适用numpy解释执行，直接变成一个cpu kernel，用来验证算法的准确性。
+
+- `TRITON_PRINT_AUTOTUNING=1`
+
+打印每次 tuning 中的最优 tuning config 和 耗时。
+
+## 打印pass前后ir
+
+- 使用 `triton-opt` 直接跑 pipeline，加上 `mlir-print-ir-after-all`
+- 改 python 中 triton 库 `site-packages/triton/backend/xxx/compiler.py` 中的代码，例如注释掉下面某个pass来看ir是否不同
+
+```python
+    # /usr/lib/python3.10/site-packages/triton/backends/xxx/compiler.py
+    def make_ttir(mod, metadata, opt):
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+        passes.common.add_inliner(pm)
+        passes.ttir.add_rewrite_tensor_pointer(pm)
+        passes.ttir.add_combine(pm)
+        passes.common.add_canonicalizer(pm)
+        passes.ttir.add_reorder_broadcast(pm)
+        passes.common.add_cse(pm)
+        passes.common.add_licm(pm)
+        passes.common.add_symbol_dce(pm)
+        pm.run(mod)
+        return mod
+```
+
+# 优化
+
+## 常见方法
+
+1.调整tuning config
+
+先把粒度调细，确定当前任务规模的最优性能大致选择的tuning config，再写减枝函数。
+
+- 调整拆分大小：BLOCK_SIZE
+- num_stages调整流水级数
+
+2.修改算法实现。
+
+每个算子的理论计算量是固定的，一般都是有冗余的IO。
+
+3.添加新的下降pattern
+
+一般涉及不到。elementwise(broadcast(a), broadcast(b)) -> broadcast(elementwise(a, b))
+
+## 示例
+
+1.修改算法，减少load数量
+
+layernorm的正向计算：load一次计算mean，再load一次计算var -> `var = sum(x^2) / n - x_hat^2` 一次计算mean和var
+
+```python
+@triton.jit
+def _layer_norm_fwd_fused(
+    ...
+    mean = 0
+    _mean = tl.zeros([BLOCK_SIZE], dtype=tl.float32)
+    for off in range(0, N, BLOCK_SIZE):
+        cols = off + tl.arange(0, BLOCK_SIZE)
+        a = tl.load(X + cols, mask=cols < N, other=0.).to(tl.float32)
+        _mean += a
+    mean = tl.sum(_mean, axis=0) / N
+    # Compute variance
+    _var = tl.zeros([BLOCK_SIZE], dtype=tl.float32)
+    for off in range(0, N, BLOCK_SIZE):
+        cols = off + tl.arange(0, BLOCK_SIZE)
+        x = tl.load(X + cols, mask=cols < N, other=0.).to(tl.float32)
+        x = tl.where(cols < N, x - mean, 0.)
+        _var += x * x
+    var = tl.sum(_var, axis=0) / N
+    rstd = 1 / tl.sqrt(var + eps)
+    ...
+```
+
+`var = sum((x - mean)^2)` -> `var = sum(x^2) / n - mean^2`
+
+```python
+# Optimized Implementation.
+@triton.jit
+def _layer_norm_fwd_fused_with_small_n(
+    ...
+    # Compute mean and variance
+    mean = 0
+    _mean = tl.zeros([BLOCK_SIZE], dtype=tl.float32)
+    _x_square = tl.zeros([BLOCK_SIZE], dtype=tl.float32)
+    for off in range(0, N, BLOCK_SIZE):
+        cols = off + tl.arange(0, BLOCK_SIZE)
+        a = tl.load(X + cols, mask=cols < N, other=0.).to(tl.float32)
+        _mean += a
+        _x_square += a * a
+    mean = tl.sum(_mean, axis=1) / N
+    var = tl.sum(_x_square, axis=1) / N - mean * mean
+    rstd = 1 / tl.sqrt(var + eps)
+    ...
+```
+
+2.合并kernel，调节config
+
+例：来源：[flaggems/vector_norm](https://github.com/FlagOpen/FlagGems/blob/master/src/flag_gems/ops/vector_norm.py#L146C1-L168C23)
+
+```python
+@triton.jit
+def min_norm_kernel_1(X, Mid, M, BLOCK_SIZE: tl.constexpr):
+    pid = tl.program_id(0)
+    offset = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    X = X + offset
+    Mid = Mid + pid
+    mask = offset < M
+
+    x = tl.load(X, mask=mask, other=float("inf")).to(tl.float32)
+    mid = tl.min(tl.abs(x))
+    tl.store(Mid, mid)
+
+@triton.jit
+def min_norm_kernel_2(Mid, Out, MID_SIZE, BLOCK_MID: tl.constexpr):
+    offset = tl.arange(0, BLOCK_MID)
+    Mid = Mid + offset
+    mask = offset < MID_SIZE
+    mid = tl.load(Mid, mask=mask, other=float("inf")).to(tl.float32)
+    out = tl.min(mid)
+    tl.store(Out, out)
+
+# 传入kernel的参数
+BLOCK_SIZE = triton.next_power_of_2(math.ceil(math.sqrt(M)))
+MID_SIZE = triton.cdiv(M, BLOCK_SIZE) # grid
+BLOCK_MID = triton.next_power_of_2(MID_SIZE)
+mid = torch.empty([MID_SIZE], dtype=dtype, device=x.device)
+out = torch.empty(shape, dtype=dtype, device=x.device)
+min_norm_kernel_1[(MID_SIZE,)](x, mid, M, BLOCK_SIZE)
+min_norm_kernel_2[(1,)](mid, out, MID_SIZE, BLOCK_MID)
+```
+
+->
+
+```python
+def cfggen_reduce_op():
+    block_size = [1024, 2048, 4096, ...]
+    num_stage = [...]
+    configs=[
+        triton.Config({"BLOCK_SIZE": m}, num_warps=4, num_stages=s) for m in block_size for s in num_stage
+    ]
+    return configs
+
+def prune_reduce_config(configs, named_args, **kwargs):
+    M = named_args["M"]
+    pruned_configs = []
+    for config in configs:
+        BLOCK_SIZE = config.kwargs["BLOCK_SIZE"]
+        num_stages = config.num_stages
+        num_block = M // BLOCK_SIZE
+        ...
+    if (len(pruned_configs) == 0):
+        pruned_configs.append(triton.Config({"BLOCK_SIZE": next_power_of_two(M)}, num_warps=4, num_stages=1))
+    return pruned_configs
+
+@triton.autotune(
+    configs=cfggen_reduce_op(),
+    key=["M"],
+    prune_configs_by={'early_config_prune': prune_reduce_config}
+)
+@triton.jit
+def min_norm_kernel(
+    X,
+    Out,
+    M,
+    BLOCK_SIZE: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < M
+    x = tl.load(X + offsets, mask, other=0.0).to(tl.float32)
+    mid = tl.min(tl.abs(x))
+    tl.atomic_min(Out, mid.to(tl.float32))
+
+# 传入kernel的参数
+grid = lambda meta: (triton.cdiv(M, meta['BLOCK_SIZE']), )
+out = torch.zeros(shape, dtype=torch.float, device=x.device)
+min_norm_kernel_1[grid](x, out, M)
+```
+
+3.common：LICM，减少跳转开销
+
+改进写法要减少 H*W - 1次跳转开销
+
+```python
+for i in range(H):
+    for j in range(W):
+        if (a > b):
+            compute1()
+        else:
+            compute2()
+
+->
+
+if (a > b):
+    for i in range(H):
+        for j in range(W):
+            compute1()
+else:
+    for i in range(H):
+        for j in range(W):
+            compute2()
+```
 
 # IR
 
@@ -625,45 +889,3 @@ In order to **avoid shared memory bank conflicts**, elements may be **swizzled
 同一个warp内的thread同时访问同一列的数据会产生 bank 冲突，对数据进行 swizzle，调整相关的存储位置，保证 thread 访问时不出现 bank conflict。
 
 ![swizzled memory](/assets/img/blog/img_triton_survey/swizzled.png)
-
-# trick
-
-## 不同的环境变量
-
-- `MLIR_ENABLE_DUMP=1`
-
-dumps the IR before every MLIR pass Triton runs
-
-- `TRITON_PRINT_AUTOTUNING=1`
-
-打印每次选择的 config
-
-- `TRITON_INTERPRET=1`
-
-适用numpy解释执行，直接变成一个cpu kernel，用来验证算法的准确性。
-
-- `TRITON_PRINT_AUTOTUNING=1`
-
-打印每次 tuning 中的最优 tuning config 和 耗时。
-
-## 打印pass前后ir
-
-- 使用 `triton-opt` 直接跑 pipeline，加上 `mlir-print-ir-after-all`
-- 改 python 中 triton 库 `site-packages/triton/backend/xxx/compiler.py` 中的代码，例如注释掉下面某个pass来看ir是否不同
-
-```python
-    # /usr/lib/python3.10/site-packages/triton/backends/xxx/compiler.py
-    def make_ttir(mod, metadata, opt):
-        pm = ir.pass_manager(mod.context)
-        pm.enable_debug()
-        passes.common.add_inliner(pm)
-        passes.ttir.add_rewrite_tensor_pointer(pm)
-        passes.ttir.add_combine(pm)
-        passes.common.add_canonicalizer(pm)
-        passes.ttir.add_reorder_broadcast(pm)
-        passes.common.add_cse(pm)
-        passes.common.add_licm(pm)
-        passes.common.add_symbol_dce(pm)
-        pm.run(mod)
-        return mod
-```
