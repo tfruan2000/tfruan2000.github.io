@@ -141,7 +141,7 @@ string minWindow(string s, string t) {
     // 左移直到不覆盖
     while (isEqual(maps, mapt)) {
       --maps[s[l]];
-      --l;
+      ++l;
     }
     int tmp = l - 1;
     if (r - tmp + 1 < len) {
@@ -1135,12 +1135,12 @@ void pack_01(){
 上述两个代码的数据初始化如下
 
 ```cpp
-  vector<int> vi(N+1, 0);
-    vector<int> wi(N+1, 0);
-    vi[0] = 0;
-    wi[0] = 0;
-    for(int i=1; i<=N; i++)
-        cin >> vi[i] >> wi[i];
+vector<int> vi(N+1, 0);
+vector<int> wi(N+1, 0);
+vi[0] = 0;
+wi[0] = 0;
+for(int i=1; i<=N; i++)
+    cin >> vi[i] >> wi[i];
 ```
 
 ### 完全背包
@@ -1189,12 +1189,12 @@ void pack_full(){
 上述两个代码的数据初始化如下
 
 ```cpp
-  vector<int> vi(N+1, 0);
-    vector<int> wi(N+1, 0);
-    vi[0] = 0;
-    wi[0] = 0;
-    for(int i=1; i<=N; i++)
-        cin >> vi[i] >> wi[i];
+vector<int> vi(N+1, 0);
+vector<int> wi(N+1, 0);
+vi[0] = 0;
+wi[0] = 0;
+for(int i=1; i<=N; i++)
+    cin >> vi[i] >> wi[i];
 ```
 
 更加优化：**转换成01背包**
@@ -1312,6 +1312,30 @@ void pack_multi(){
             dp[j] = max(dp[j], dp[j - vi[i]] + wi[i]);
     }
     cout << dp[V];
+}
+```
+
+## 股票购买问题
+
+最多进行max_k次交易，要求收益最大
+
+```cpp
+// 后一天只依赖于前一天的情况
+int maxProfit(vector<int>& prices, int max_k) {
+  int size = prices.size();
+  if (size < 2) return 0;
+  vector<vector<int>> dp(max_k + 1, vector<int>(2, 0));
+  for (int k = 1; k <= max_k; ++k) {
+    dp[k][0] = 0;
+    dp[k][1] = -prices[0];
+  }
+  for (int i = 1; i < size; ++i) {
+    for (int k = max_k; k >=1; --k) {
+      dp[k][0] = max(dp[k][0], dp[k][1] + prices[i]);
+      dp[k][1] = max(dp[k][1], dp[k - 1][0] - prices[i]);
+    }
+  }
+  return dp[max_k][0];
 }
 ```
 

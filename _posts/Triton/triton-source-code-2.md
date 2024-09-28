@@ -6,50 +6,43 @@ add_convert_to_ttgpuir
 
 # layout
 
+Layout 定义了Data是如何被Thread处理。这种layout attr在lowering过程中被传递，用于描述op的拆分映射关系。
+
+> include/triton/Dialect/TritonGPU/IR/TritonGPUAttrDefs.td
+
 自 [[RFC] To generalize TritonGPU dialect for GPU of different vendors](https://github.com/triton-lang/triton/issues/2639) 后， TritonGPU Dialect 中的 Layout Attribute 正式统一为下图
 
 ![TritonGPU Attr](/assets/img/blog/img_triton_pass/layout_attr.png)
 
-Layout：定义了Data是如何被Thread处理。这种layout attr在lowering过程中被传递，用于描述op的拆分映射关系
-
-> Block layout等 distributed layout 描述线程的访存行为；shared layout 描述smem中哪些元素会被同时访问，然后进行swizzled，防止banck conflict
-
-- **Distributed Layout：**Blocked Layout, MMA Layout, DotOperand Layout都属于此类。这些Layout的特点都是映射函数会将特定的Tensor交给特定的Thread去处理(即一个layout描述整个tensor的访问模式)，达到一个**distribution**的效果
-
-```cpp
-class DistributedEncoding<string name> : TritonGPU_Attr<name> {
-  let description =[{
-    The layout function \mathcal{L} of this layout is then defined, for an
-    index `i` \in R^D, as follows:
-
-    \mathcal{L}(A)[i_d] = L[(i_d + k_d*A.shape[d]) % L.shape[d]] \forall k_d such as i_d + k_d*A.shape[d] < L.shape[d]
-
-    For example, for a tensor/layout pair
-    A = [x  x  x  x  x  x  x  x]
-        [x  x  x  x  x  x  x  x]
-    L = [0  1  2  3 ]
-        [4  5  6  7 ]
-        [8  9  10 11]
-        [12 13 14 15]
-
-    Then the data of A would be distributed as follow between the 16 CUDA threads:
-    // L(i, j) = {...} 用来描述数据 (i, j) 被哪些CUDA线程访问
-    L(A) = [ {0,8} , {1,9} , {2,10}, {3,11}, {0,8} , {1, 9} , {2, 10}, {3, 11},
-            {4,12}, {5,13}, {6,14}, {7,15}, {4,12}, {5, 13}, {6, 14}, {7, 15} ]
-    }];
-...
-}
-```
-
-- **Shared Layout**: GPU中的Shared Memory是可以被一个Block内的任意线程访问的，shared layout会被用来描述哪些元素会被线程同时访问，以此来减少bank confict映射函数被定义为任意Tensor->任意Thread。
-
 ## distributed layout
-
-Distributed encodings have a layout function that is entirely characterized by a d-dimensional tensor L. Note that L doesn't need to have the same shape (or even the same rank) as the tensor it is encoding.
 
 映射函数(layout function)会将特定的Tensor交给特定的Thread去处理(即一个layout描述整个tensor的访问模式)，达到一个**distribution**的效果
 
-![distribute_layout](/assets/img/blog/img_triton_survey/distribute_layout.png)
+layout function 说明：
+
+```cpp
+- 计算公式
+\mathcal{L}(A)[i_d] = L[(i_d + k_d*A.shape[d]) % L.shape[d]] \forall k_d such as i_d + k_d*A.shape[d] < L.shape[d]
+
+- 举例：A 是需要访问的数据，L是当前线程的布局
+A = [x  x  x  x  x  x  x  x]
+    [x  x  x  x  x  x  x  x]
+L = [0  1  2  3 ]
+    [4  5  6  7 ]
+    [8  9  10 11]
+    [12 13 14 15]
+
+// L(i, j) = {...} 用来描述数据 (i, j) 被哪些CUDA线程访问
+L(A) = [ {0,8} , {1,9} , {2,10}, {3,11}, {0,8} , {1, 9} , {2, 10}, {3, 11},
+        {4,12}, {5,13}, {6,14}, {7,15}, {4,12}, {5, 13}, {6, 14}, {7, 15} ]
+
+- 计算过程
+d = 0 或 1， 0 <= k_0 <= 3，0 <= k_1 <= 3，A.shape = [2, 8]， L.shape = [4, 4]
+那么负责访问 A[1, 3] 的线程为：
+(i_0 + k_0 * A.shape[0]) % L.shape[0] = (1 + [0, 3] * 2) % 4 = 1 或 3
+(i_1 + k_1 * A.shape[1]) % L.shape[1] = (3 + [0, 3] * 8) % 4 = 3
+所以负责访问 A[1, 3] 的线程是 L[1, 3] 和 L[3, 3]。
+```
 
 ### block layout
 
@@ -95,3 +88,7 @@ In order to **avoid shared memory bank conflicts**, elements may be **swizzled
 同一个warp内的thread同时访问同一列的数据会产生 bank 冲突，对数据进行 swizzle，调整相关的存储位置，保证 thread 访问时不出现 bank conflict。
 
 ![swizzled memory](/assets/img/blog/img_triton_survey/swizzled.png)
+
+## linear layout
+
+类似 CUTLASS v3 中的 CuTe Layout，在 [PR](https://github.com/triton-lang/triton/pull/3794) 中第一次引入，用于表示生成 indices 的行为。
