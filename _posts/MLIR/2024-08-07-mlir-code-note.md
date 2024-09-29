@@ -5075,13 +5075,15 @@ build/bin/llvm-lit mlir/test/Dialect/Linalg/decompose-ops.mlir -a
 
 # Trait
 
-## OpTrait
-
 ```cpp
 mlir/include/mlir/IR/OpDefinition.h
 ```
 
+## OpTrait
+
 用 `mightHaveTrait` 、 `hasTrait` 来判断
+
+一般以 trait 的形式写在 op 定义的 td 中，当 op 不符时会报错。
 
 1.SameTypeOperands : 所有operand type相同
 
@@ -5143,6 +5145,12 @@ Liveness liveness(op->getParentWithTrait<OpTrait::IsIsolatedFromAbove>());
 Block *block = op->getBlock();
 const LivenessBlockInfo *blockInfo = liveness.getLiveness(block);
 ```
+
+## trait vs OpInterface
+
+trait 一般用来检查一个 op 是否实现了一个 trait，相当于concrete Op without virtual methods 的一个基类，一般就用在 op 的 verify。
+
+OpInterface 都带有 trait，提供了多态，相当于 op with virtual methods 的一个基础类，例如 CopyOpInterface。
 
 ---
 

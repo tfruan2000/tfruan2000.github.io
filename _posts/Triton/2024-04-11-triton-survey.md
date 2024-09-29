@@ -150,7 +150,7 @@ triton 的[组成](https://github.com/triton-lang/triton/tree/main/python/triton
 
 - [language](https://github.com/triton-lang/triton/tree/main/python/triton/language)：前端的triton-lang语法
 - [compiler](https://github.com/triton-lang/triton/tree/main/python/triton/compiler)：kernel编译的行为，会根据后端调用对应的pipeline，把triton-lang下降到硬件汇编
-- [runtime](https://github.com/triton-lang/triton/tree/main/python/triton/runtime)：cache，auto-tuning， jit 等组件
+- [runtime](https://github.com/triton-lang/triton/tree/main/python/triton/runtime)：cache，autotuner， jit 等组件
 - [backends](https://github.com/triton-lang/triton/tree/main/python/triton/backends): 编译完后，在执行时掉用的是真实后端，例如 [nvgpu](https://github.com/triton-lang/triton/tree/main/third_party/nvidia/backend)，这里主要包含 compiler 时的 pipeline 组织， launch 函数(使用模版加真实kernel参数生成真实的launch函数)等
 
 ## languague
@@ -263,20 +263,17 @@ add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
 add_kernel(x.data_ptr, y.data_ptr, output, n_elements, BLOCK_SIZE=1024, grid, num_warps=4, num_stages=3, extern_libs=None, stream=None, warmup=False)
 ```
 
-### auto-tuning
+### autotune
 
-@[auto-tuning](https://triton-lang.org/main/python-api/generated/triton.autotune.html) ：由 `@triton.jit`装饰的kernel可以调用 `@auto-tuning` detector触发自动调优
+@[autotune](https://triton-lang.org/main/python-api/generated/triton.autotune.html) ：由 `@triton.jit`装饰的kernel可以调用 `@autotune` detector触发自动调优
 
 使用上需要提供一个configs（包含在kernel中定义的 `tl.constexpr`）列表，autotune会多次运行kernel函数来评估configs中的所有配置。（配置是人为给出的，所以空间不大，依赖人为经验）
 
-- key：参数列表，当key中的参数改变时，需要重新评估configs
-
+- key：参数列表，当key中的参数改变时，需要重新评估tuning
 - prune_configs_by：用户可以传入函数来帮助减枝（例如基于性能模型的函数），加快收敛
-
-- reset_to_zero：输入参数名列表，在运行前将这些参数重置为0
-
+- reset_to_zero：输入参数名列表，这些参数的值在评估任何配置之前将被重置为零。
+- restore_value：输入参数名列表，这些参数的值在评估任何配置之前将被重置为初始值。（某些kernel是inplace的）
 - warmup：每个config的warmup时间，默认25ms
-
 - rep：每个config的重复时间，默认100ns
 
 ```python
@@ -295,11 +292,38 @@ add_kernel(x.data_ptr, y.data_ptr, output, n_elements, BLOCK_SIZE=1024, grid, nu
 )
 ```
 
-当前**要求所有BLOCK_SIZE设置的值都得是2次幂**，因为在gpu上数据为2次冪的规模时性能更好。
+（1）当前**要求所有BLOCK_SIZE设置的值都得是2次幂**，因为在gpu上数据为2次冪的规模时性能更好。
 
 ```python
 n_rows, n_cols = x.shape
 BLOCK_SIZE = triton.next_power_of_2(n_cols)
+```
+
+（2）暴力细粒度tune时间太常，可以通过 `prune_configs_by` 减枝
+
+```python
+@triton.autotune(
+    configs=cfggen_reduce_op(),
+    key=["M"],
+    prune_configs_by={'early_config_prune': prune_reduce_config}
+)
+```
+
+任何设置这个 prune_func ? 根据经验以及硬件。
+
+```python
+def prune_reduce_config(configs, named_args, **kwargs):
+    M = named_args["M"]
+    pruned_configs = []
+    for config in configs:
+        BLOCK_SIZE = config.kwargs["BLOCK_SIZE"]
+        num_stages = config.num_stages
+        num_block = M // BLOCK_SIZE
+        ...
+    if (len(pruned_configs) == 0):
+        pruned_configs.append(triton.Config({"BLOCK_SIZE": next_power_of_two(M)}, num_warps=4, num_stages=1))
+    return pruned_configs
+
 ```
 
 ### cache
@@ -344,7 +368,7 @@ python->ast->ttir->...
 - `constexpr_vals`： 标记为 `tl.constexpr` 的参数
 - `excess_kwargs`：`num_stages`, `num_warps`, `num_stages` 等
 
-缓存 `auto-tuning` 中性能最好的 config 生成的 kernel。
+缓存 `autotune` 中性能最好的 config 生成的 kernel。
 
 ## backend
 
@@ -802,90 +826,20 @@ triton python 语言是python的一个子集，它通过ast 模块解析python�
 
 ![dialect](/assets/img/blog/img_mlir_gpu_pipeline_component/nvvm_dialect_ir.png)
 
+## 添加一种新原语
+
+参考：[Implement scaled_dot(mxfp8, fp8) via mma](https://github.com/triton-lang/triton/pull/4795)
+
+dot_scaled -> semantic.dot_scaled -> tl.tensor(builder.create_dot_scaled(...)）
+
+1.`python/triton/language/core.py` 中注册该原语，return部分会调用到 semantic 中
+
+2.`python/triton/language/semantic.py` 描述了该原语创建 ir 的行为，例如对operand进行 broadcast 或 splat
+
+3.`python/src/ir.cc` 创建triton dialect op(tt.op)
+
+4.添加后续conversion(ttir->ttgir->llvmir)
+
 ## layout
 
 Layout：定义了Data是如何被Thread处理。这种layout attr在lowering过程中被传递，用于描述op的拆分映射关系
-
-> Block layout等 distributed layout 描述线程的访存行为；shared layout 描述smem中哪些元素会被同时访问，然后进行swizzled，防止banck conflict
-
-- **Distributed Layout：**Blocked Layout, MMA Layout, DotOperand Layout都属于此类。这些Layout的特点都是映射函数会将特定的Tensor交给特定的Thread去处理(即一个layout描述整个tensor的访问模式)，达到一个**distribution**的效果
-
-```cpp
-class DistributedEncoding<string name> : TritonGPU_Attr<name> {
-  let description =[{
-    The layout function \mathcal{L} of this layout is then defined, for an
-    index `i` \in R^D, as follows:
-
-    \mathcal{L}(A)[i_d] = L[(i_d + k_d*A.shape[d]) % L.shape[d]] \forall k_d such as i_d + k_d*A.shape[d] < L.shape[d]
-
-    For example, for a tensor/layout pair
-    A = [x  x  x  x  x  x  x  x]
-        [x  x  x  x  x  x  x  x]
-    L = [0  1  2  3 ]
-        [4  5  6  7 ]
-        [8  9  10 11]
-        [12 13 14 15]
-
-    Then the data of A would be distributed as follow between the 16 CUDA threads:
-    // L(i, j) = {...} 用来描述数据 (i, j) 被哪些CUDA线程访问
-    L(A) = [ {0,8} , {1,9} , {2,10}, {3,11}, {0,8} , {1, 9} , {2, 10}, {3, 11},
-            {4,12}, {5,13}, {6,14}, {7,15}, {4,12}, {5, 13}, {6, 14}, {7, 15} ]
-    }];
-...
-}
-```
-
-- **Shared Layout**: GPU中的Shared Memory是可以被一个Block内的任意线程访问的，shared layout会被用来描述哪些元素会被线程同时访问，以此来减少bank confict映射函数被定义为任意Tensor->任意Thread。
-
-### distributed layout
-
-Distributed encodings have a layout function that is entirely characterized by a d-dimensional tensor L. Note that L doesn't need to have the same shape (or even the same rank) as the tensor it is encoding.
-
-映射函数(layout function)会将特定的Tensor交给特定的Thread去处理(即一个layout描述整个tensor的访问模式)，达到一个**distribution**的效果
-
-![distribute_layout](/assets/img/blog/img_triton_survey/distribute_layout.png)
-
-#### block layout
-
-最常见的 layout，包含了配合 AxisInfoAnalysis 分析获得 load 和 store 的访存行为，以用来访存合并。
-
-> 一个 warp 中的所有 thread 在同一时间点只能执行相同的指令，所以需要访问的内存越连续，最后 load/store transactions 的数量就越少。配合 shared layout 来调整数据分布，减少 transactions。
-
-An encoding where each warp owns a contiguous portion of the target tensor. This is typically the kind of data layout **used to promote memory coalescing in LoadInst and StoreInst.**
-
-`#blocked0 = #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [8, 4], warpsPerCTA = [8, 1], order = [1, 0]}>`
-
-<img src="/assets/img/blog/img_triton_survey/cta_warp_thread.png" alt="Untitled" style="zoom:50%;" />
-
-- sizePerThread = [1, 8]：每个线程处理数据Size
-- threadsPerWarp = [8, 4]： warp内线程的布局
-- warpsPerCTA = [8, 1]：thread block内warp的布局
-- order = [1, 0]：先访问dim1，再访问dim0
-
-> Triton 会优先 `Contiguity` 更大的维度， `Contiguity`  信息一般来自于使用 `tl.max_contiguous(input, values)` 人为告知编译器，这意味着 input[i] 中每 values[i] 个相邻元素是连续的。
-
-该BLock访存模式一次能处理(1x8x8, 8x4) = (64, 32)规模的shape。但若输入op的shape为(128, 32)，那么让每个thread处理两个连续块即可，即第一个thread处理(0, 0:7), (64, 0:7)两个块
-
-假如一个 warp 希望访问 128 个数，32 个 thread 可以通过四次搬运完成：
-
-```text
-#blocked_before = #triton_gpu.blocked<{sizePerThread = [1, 1], threadsPerWarp = [32, 1], warpsPerCTA = [4, 1], order = [0, 1]}>
-```
-
-memory-coalesce 后将会生成下面的 Layout(第二维连续更长，所以order也要跟着改变)，这样每个 thread 处理的数据更多，更能在后端映射成 vectorization 指令。
-
-```text
-#blocked_after = #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [2, 16], warpsPerCTA = [4, 1], order = [1, 0]}>
-```
-
-#### MMA Layout 和 DotOperand Layout
-
-用来指导 op 下降到特殊指令的 attr。
-
-### shared layout
-
-In order to **avoid shared memory bank conflicts**, elements may be **swizzled** in memory.
-
-同一个warp内的thread同时访问同一列的数据会产生 bank 冲突，对数据进行 swizzle，调整相关的存储位置，保证 thread 访问时不出现 bank conflict。
-
-![swizzled memory](/assets/img/blog/img_triton_survey/swizzled.png)
