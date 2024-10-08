@@ -35,9 +35,13 @@ TritonGPU Dialect 这一层的 IR的 tensor 表示将带有 Layout 的 Attr，�
 
 swizzle：调整数据在 shared memory 上的存储位置，保证 thread 访问时不出现 bank conflict。
 
+该layout中主要对象为：
+
 - vec：同行的元素进行swizzle时，连续vec个为一组
 - perPhase：一次 swizzling phase 处理的 row 数。连续的 perPhase 行用相同的swizzle方法。
 - maxPhase：swizzling phase的个数
+- order：表明哪一个为主序，[1, 0] 为行主序，同行相邻元素地址连续
+- hasLeadingOffset：默认为false，Hopper MMAv3为true
 
 最基础的方法就是地址 与 phase_id 进行 xor。
 
@@ -74,16 +78,27 @@ swizzle：调整数据在 shared memory 上的存储位置，保证 thread 访�
 
 - #shared<{vec=2, perPhase=1, maxPhase=4, order=[1,0]}>
 
+xor的值乘以vec的作为倍数
+
 ```text
-  [ 0,  1,  2,  3,  4,  5,  6,  7],
-  [10, 11,  8,  9, 14, 15, 12, 13],
-  [20, 21, 22, 23, 16, 17, 18, 19],
-  [30, 31, 28, 29, 26, 27, 24, 25]
+  [ 0,  1,  2,  3,  4,  5,  6,  7], // xor with 0
+  [10, 11,  8,  9, 14, 15, 12, 13], // xor with 2
+  [20, 21, 22, 23, 16, 17, 18, 19], // xor with 4
+  [30, 31, 28, 29, 26, 27, 24, 25]  // xor with 6
 ```
 
 <!-- ![swizzled memory](/assets/img/blog/img_triton_survey/swizzled.png) -->
 
 ## distributed layout
+
+distributed encoding 将信息分为4维：
+
+- CTAs Per CGA：在 hopper 上才有用
+- Warps Per CTA：CTA 内 warp 的布局
+- Threads Per Warp：warp 内 thread 的布局
+- Values Per Thread：一个 thread 需要处理多少元素
+
+例如：`sizePerThread = [1, 8], threadsPerWarp = [8, 4], warpsPerCTA = [8, 1]`
 
 映射函数(layout function)会将特定的Tensor交给特定的Thread去处理(即一个layout描述整个tensor的访问模式)，达到一个**distribution**的效果
 
@@ -111,6 +126,25 @@ d = 0 或 1， 0 <= k_0 <= 3，0 <= k_1 <= 3，A.shape = [2, 8]， L.shape = [4,
 (i_0 + k_0 * A.shape[0]) % L.shape[0] = (1 + [0, 3] * 2) % 4 = 1 或 3
 (i_1 + k_1 * A.shape[1]) % L.shape[1] = (3 + [0, 3] * 8) % 4 = 3
 所以负责访问 A[1, 3] 的线程是 L[1, 3] 和 L[3, 3]。
+```
+
+常用函数方法
+
+```text
+// 继承自 cta layout
+SmallVector<unsigned> getCTAsPerCGA() const;
+SmallVector<unsigned> getCTAOrder() const;
+SmallVector<unsigned> getCTASplitNum() const;
+
+SmallVector<unsigned> getWarpsPerCTA() const;
+SmallVector<unsigned> getWarpOrder() const;
+SmallVector<unsigned> getThreadsPerWarp() const;
+SmallVector<unsigned> getThreadOrder() const;
+SmallVector<unsigned> getSizePerThread() const;
+// sizePerThread * threadsPerWarp * warpsPerCTA
+SmallVector<unsigned> getShapePerCTATile(ArrayRef<int64_t> tensorShape = ArrayRef<int64_t>()) const;
+
+std::optional<LinearLayout> toLinearLayout(ArrayRef<int64_t> shape) const;
 ```
 
 ### block layout
