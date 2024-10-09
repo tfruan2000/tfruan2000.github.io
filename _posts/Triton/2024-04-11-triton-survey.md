@@ -213,6 +213,7 @@ def jit(
 ```
 
 > `@triton.jit` 的 `do_not_specialize` 参数，来阻止 triton 生成过多的 kernel。
+>
 > triton jit 会以每一个非指针参数为准，去生成一个kernel，比如某一个参数运行时取值可能为1或0，那么 triton 就会为它们各生成一个。
 
 `JITFunction` 对象继承自 `KernelInterface`，并封装了一些调用语法糖。
@@ -362,7 +363,7 @@ python->ast->ttir->...
 
 3.某个op多次执行，什么时候会hit cache，什么时候需要重新编译呢？
 
-这需要从 triton 何时会产生一个新 cache 讲起。 triton 会以 [key](https://github.com/triton-lang/triton/blob/main/python/triton/runtime/jit.py#L616) 为核心，key 包含 `sig_and_spec`, `constexpr_vals` 和 `excess_kwargs`。
+这需要从 triton 何时会产生一个新 cache 讲起。 triton 会以 [key](https://github.com/triton-lang/triton/blob/main/python/triton/runtime/jit.py#L583) 为核心，key 包含 `sig_and_spec`, `constexpr_vals` 和 `excess_kwargs`。
 
 - `sig_and_spec`： 函数名 和 参数类型，直接表现在 kernel 上。当参数类型很多的时候也可以使用 `do_not_specialize` 来排除掉某些参数的影响，来避免生成更多的 kernel。
 - `constexpr_vals`： 标记为 `tl.constexpr` 的参数
@@ -609,7 +610,9 @@ dumps the IR before every MLIR pass Triton runs
 
 - `TRITON_INTERPRET=1`
 
-适用numpy解释执行，直接变成一个cpu kernel，用来验证算法的准确性。
+适用 numpy **解释执行**，直接变成一个cpu kernel，用来验证算法的准确性。
+
+可以方便地使用 pdb 和 print，针对 load 和 store 都重新实现了，但不支持 atomic，不支持多级指针(`!tt.ptr<!tt.ptr<f32>>`)。
 
 - `TRITON_PRINT_AUTOTUNING=1`
 
@@ -843,3 +846,90 @@ dot_scaled -> semantic.dot_scaled -> tl.tensor(builder.create_dot_scaled(...)）
 ## layout
 
 Layout：定义了Data是如何被Thread处理。这种layout attr在lowering过程中被传递，用于描述op的拆分映射关系
+
+[TODO]
+
+# pytorch-to-triton
+
+pytorch代码通过 `torch.compile`(Inductor) 可以产生 triton kernel
+
+- 输入: test_add.py
+
+```python
+import torch
+
+def func(in1, in2):
+    return torch.add(in1, in2)
+
+opt_fn = torch.compile(func)
+
+a = torch.randn(100, 10480, device="cuda")
+b = torch.randn(100, 10480, device="cuda")
+opt_fn(a,b)
+```
+
+- 运行： `python test_add.py`
+
+在 `/tmp/torchinductor_${USER}` 下找到 triton code 以及 ttir
+
+```bash
+/tmp/torchinductor_root# tree -L 3
+
+.
+|-- 5a # 包含__main__封装的函数调用行为
+|   `-- c5anvd6whgca2cpb7ukgizx5jlgxefgorn7ebtgxxtj2tm53rkom.py
+|-- im # tuning 时的最优config 以及 生成的 triton kernel
+|   |-- cimktqodcpl2shgn3s6k3t3aa7m4b3dogeudqxny3cvpjkrmjjtx.best_config
+|   `-- cimktqodcpl2shgn3s6k3t3aa7m4b3dogeudqxny3cvpjkrmjjtx.py
+`-- triton # compile cache
+    `-- 0
+        |-- 1801f53031fb6b10991a839c4c36f1ac09a877d0118cd6433bc1c4348b757831
+        |-- 3a61b614a201d7c8de1da696f6276c6469631a07e1c1112872fcde349e60acb2
+        |-- 83f4d801beeb824446d3ceb3e79e3e01bd3e2b91ab6fda189b715a72fcdf30e9
+        |-- 9bebfd64edaf8e09d00770860d8e8ced2ff88b1f9ed6d7f2338124d13cc915c7
+        |-- ae0c8a3e48147ccc432244a44fbd1d4793e58cd52158c26689f388047c187e97
+        |-- b4c72811b23880731310c2e71420ebfb89924cf8f93373f68d0baa43ee03cf67
+        `-- e6ab39b907a1a1838c7b1094681fe980548c7a9397404bba4b9daeb99b966266
+```
+
+其中生成的 triton kernel (triton-lang) 表示为
+
+```python
+import triton
+import triton.language as tl
+from triton.compiler.compiler import AttrsDescriptor
+
+from torch._inductor import triton_helpers, triton_heuristics
+from torch._inductor.ir import ReductionHint, TileHint
+from torch._inductor.triton_helpers import libdevice, math as tl_math
+from torch._inductor.triton_heuristics import AutotuneHint
+from torch._inductor.utils import instance_descriptor
+
+@triton_heuristics.pointwise(
+    size_hints=[1048000],
+    filename=__file__,
+    triton_meta={'signature': {0: '*fp32', 1: '*fp32', 2: '*fp32', 3: 'i32'}, 'device': 0, 'device_type': 'cuda', 'constants': {}, 'configs': [AttrsDescriptor(divisible_by_16=(0, 1, 2, 3), equal_to_1=())]},
+    inductor_meta={'autotune_hints': set(), 'kernel_name': 'triton_poi_fused_add_0', 'mutated_arg_names': [], 'no_x_dim': False, 'backend_hash': '52964130331800C009CC77AD19A8AAFB702D8BB9B81D6B43FE21DEBE4B5B40E7'},
+    min_elem_per_thread=0
+)
+@triton.jit
+def triton_poi_fused_add_0(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr, XBLOCK_FRAGMENT : tl.constexpr):
+    xnumel = 1048000
+    xoffset_num = tl.cdiv(XBLOCK, XBLOCK_FRAGMENT)
+    xstep = tl.num_programs(0) * XBLOCK_FRAGMENT
+    xoffset_begin = tl.program_id(0) * XBLOCK_FRAGMENT
+    for offset in range(xoffset_num):
+        xoffset = offset % xoffset_num * xstep + xoffset_begin
+        xindex = xoffset + tl.arange(0, XBLOCK_FRAGMENT)[:]
+        xmask = xindex < xnumel
+        x0 = xindex
+        tmp0 = tl.load(in_ptr0 + (x0), xmask)
+        tmp1 = tl.load(in_ptr1 + (x0), xmask)
+        tmp2 = tmp0 + tmp1
+        tl.store(out_ptr0 + (x0), tmp2, xmask)
+
+```
+
+过程细节可以看：[triton_heuristics.py](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/runtime/triton_heuristics.py)
+
+注册手写的 triton kernel：可以参考 flaggems 在 Aten 层面直接对算子进行覆盖重写，但这样就不是走 Inductor 了。还没了解如何注册到 Inductor。
