@@ -843,6 +843,22 @@ dot_scaled -> semantic.dot_scaled -> tl.tensor(builder.create_dot_scaled(...)）
 
 4.添加后续conversion(ttir->ttgir->llvmir)
 
+## AxisInfo
+
+`AxisInfo` 会对 load、store 等对指针进行操作的 op 及相关 op 进行跟踪，分析出 `divisibility, contiguity, constancy` 信息，从而辅助之后的 pass 进行，以获得高 IO 效率。
+
+- divisibility：维度i上，所有元素的最大二次幂公约数。该值用来表示指针地址的对齐，指导后续访存操作的下降
+- contiguity：维度i上，连续元素的最小长度，说明至少每contiguity[i]个元素是连续的
+- constancy：维度i上，重复元素的最小长度，说明至少每constancy[i]个元素是重复的
+- constantValue：表示值为常数，一般信息源头来自 `arith.constant`
+
+利用这些信息可以优化放存行为：
+
+- 当 load 16x256 个数时，若低维每 256 个数重复，那么可以只 load 16 个数据，再 broadcast 成 16x256。
+- mask全为true或false时可以转为 scf.if + load，反之也可以优化为 `select %mask, %load, %other`
+
+可以通过 `test-print-alignment` pass 来打印 `AnisInfo`，详见 [TestAxisInfo](https://github.com/triton-lang/triton/blob/main/test/lib/Analysis/TestAxisInfo.cpp)
+
 ## layout
 
 Layout：定义了Data是如何被Thread处理。这种layout attr在lowering过程中被传递，用于描述op的拆分映射关系
@@ -851,7 +867,9 @@ Layout：定义了Data是如何被Thread处理。这种layout attr在lowering过
 
 # pytorch-to-triton
 
-pytorch代码通过 `torch.compile`(Inductor) 可以产生 triton kernel
+pytorch代码通过 `torch.compile` 可以产生 triton kernel。 `torch.compile` 可以使用多种 backend，例如 `eager`、`inductor`(默认) 等。
+
+下面是一个从 pytorch 代码转到 triton kernel 的例，利用了 `triton.compile(backend="indunctor")`。
 
 - 输入: test_add.py
 

@@ -835,6 +835,40 @@ vector<vector<int>> combinationSum(vector<int>& candidates, int target) {
 }
 ```
 
+5.[LeetCode131.分割回文串](https://leetcode.cn/problems/palindrome-partitioning/description/)
+
+```cpp
+int n = 0;
+vector<vector<string>> resVec;
+vector<string> res;
+bool isTarget(string &s, int l, int r) {
+  while (l < r) {
+    if (s[l] != s[r]) return false;
+    ++l;
+    --r;
+  }
+  return false;
+}
+void func(string &s, int idx) {
+  if (idx == n) {
+    resVec.push_back(res);
+    return;
+  }
+  for (int len = 1; len <= n - idx; ++len) {
+    if (isRight(s, idx, idx + len - 1)) {
+      res.push_back(s.substr(idx, len));
+      func(s, idx + len);
+      res.pop_back();
+    }
+  }
+}
+vector<vector<string>> partition(string &s) {
+  n = s.size();
+  func(s, 0);
+  return  resVec;
+}
+```
+
 # 排序
 
 ## 基础模版

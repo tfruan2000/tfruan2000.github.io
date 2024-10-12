@@ -1538,10 +1538,6 @@ offs_am = tl.max_contiguous(tl.multiple_of((pid_m * BLOCK_SIZE_M + tl.arange(0, 
 
 ## AxisInfo
 
-`AxisInfo` 主要使用 `AxisInfoExt` 类来记录信息。这个类是基于 `triton/include/triton/Analysis/AxisInfo.h` 修改的。所以理解这部分可以先去看看 triton 官方[AxisInfo](https://github.com/triton-lang/triton/blob/main/include/triton/Analysis/AxisInfo.h)。
-
-也可以看一下这篇博客 [OpenAI Triton: Dive into Axis and Coalesce](https://zhuanlan.zhihu.com/p/687394750)。
-
 ```bash
 include/triton-linalh/Analysis/AxisInfoAnalysis.h
 lib/Analysis/AxisInfoAnalysis.cpp
@@ -1549,18 +1545,24 @@ include/triton-linalg/Dialect/Triton/Interfaces/InferAxisInfoInterface.h
 lib/Dialect/Triton/Interfaces/InferAxisInfoInterface.cpp
 ```
 
-最重要的信息：
+In short:
+triton 官方的 `AxisInfo` 会对 load、store 等对指针进行操作的 op 及相关 op 进行跟踪，分析出 `divisibility, contiguity, constancy` 信息，从而辅助之后的 pass 进行，以获得高 IO 效率。
+Triton-Linalg 中的 `AxisInfoExt` 将 `contiguity, constancy` 拆成了 `stride, strideValue, rank`，以适配 SIMD 架构的 DSA 中多维访存指令。
+
+Triton-Linalg 的 `AxisInfo` 主要使用 `AxisInfoExt` 类来记录信息。这个类是基于 `triton/include/triton/Analysis/AxisInfo.h` 修改的。所以理解这部分可以先去看看 triton 官方[AxisInfo](https://github.com/triton-lang/triton/blob/main/include/triton/Analysis/AxisInfo.h)。
+
+### 信息说明
 
 - divisibility：维度i上，所有元素的最大二次幂公约数。在ttir中经常可以blockArg上有attr： `(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32}`。divisibility这个参数用来计算alignment。
 - stride: 维度i上，每 `stride[i]` 个相邻元素是连续的。对应 `tl.max_contiguous(input, values)` 的 `values`。
-- strideValue: 维度i上，两个相邻连续元素的差值为 `strideValue[i]`。对应着 `tl.multiple_of(input, values)` 的 `values`.
+- strideValue: 维度i上，两个相邻连续元素的差值为 `strideValue[i]`。对应着 `tl.multiple_of(input, values)` 的 `values`。如果 `strideValue = 0` 则代表重复元素，如果 `strideValue = 1` 则代表连续元素。
 - constantValue：该 lattice 中的 constant value
 
 > divisibilty 代表指针指向的地址能被其整除。例如 `!tt.ptr<f32>` 类型的指针的 divisibilty = 16.
 >
 > triton 官方的 AxisInfoAnalysis 会记录三个信息: divisbilty, contiguity, constancy，其中 contiguity 和 上文的 stride 是一个意思
 
-以下面两种数据为例
+以下面两种数据为例，上述三种信息的值为：
 
 ```bash
 [[10, 11, 12, 13, 18, 19, 20, 21],
@@ -1578,7 +1580,19 @@ lib/Dialect/Triton/Interfaces/InferAxisInfoInterface.cpp
 - strideValue: [1, 4]
 ```
 
-这些信息最初都是从挂在 op身上的 attr 收集的。然后需要根据数据流传递。
+若要从某个地址上取 `tensor<8x32xi32>` 的数据，分析出 divisibility = [1, 1], stride = [8, 32], strideValue = [1, 0]，
+这说明：
+
+- shape[0] = 8 & stride[0] = 8 & strideValue[0] = 1 -> 第 0 维上每 8 个数据连续
+- shape[1] = 32 & stride[1] = 32 & strideValue[1] = 0 -> 第 1 维上的每 32 个数据相同
+
+### 信息获取
+
+这些信息有两种获得途径，第一种是使用人为 `hint` 直接挂上，后续从 op 上的 attr 收集；第二种是使用 `AxisInfoAnalysis` 直接分析。
+
+- hint
+
+hint 的方式是人为在写 kernel 时通过 `max_contiguous`、`max_constany`、`multiple_of` 等 [hint op](https://triton-lang.org/main/python-api/triton.language.html#compiler-hint-ops) 来提示编译器数据的特殊性，以指导编译器的下降行为。
 
 ```cpp
 // lib/Dialect/Triton/Interfaces/InferAxisInfoInterface.cpp
@@ -1596,13 +1610,15 @@ if (Attribute attr = op->getAttr("tt.constancy")) {
          "Get tt.constancy and tt.contiguity attribute at the same op");
   auto vals = attr.cast<DenseElementsAttr>().getValues<int>();
   stride = AxisInfoExt::DimVectorT(vals.begin(), vals.end());
-  strideValue = AxisInfoExt::DimVectorT(vals.size(), 0); // 常量，所以 strideValue 全 1
+  strideValue = AxisInfoExt::DimVectorT(vals.size(), 0); // 常量，所以 strideValue 全 0
 }
 ```
 
-传递时，例如传递的时候某个op的producder的contiguity分别等于[64, 1]和[64, 64]，那么合并(求最小公倍数)后也是[64,1]
+- 分析
 
-整个传递算法是基于MLIR官方提供的数据流分析算法，通过定义每个算子的转移函数，进而推导出全图的连续性信息。
+采用 分析 的方式是会构建一个传递的链条，从某个起点(例如`tt.make_range`)一直追溯到 load / store 操作的 ptr。整个传递算法是基于MLIR官方提供的数据流分析算法，通过定义每个算子的转移函数，进而推导出全图的连续性信息。
+
+传递时，例如传递的时候某个op的producder的contiguity分别等于[64, 1]和[64, 64]，那么合并(求最小公倍数)后也是[64,1]
 
 ![alt text](/assets/img/blog/img_triton_linalg/axisInfo.png)
 

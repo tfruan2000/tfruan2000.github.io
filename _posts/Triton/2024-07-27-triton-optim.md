@@ -769,11 +769,23 @@ def max_kernel(
         tl.atomic_max(out + row_idx, res)
 ```
 
+以一个二维softmax任务总结优化流程，总数据量 m row, n col，优化过程：
+
+- 原始kernel：一次 BLOCK_SIZE_ROW 行， 1 列
+  - grid = lambda META: (triton.cdiv(n_rows, META['BLOCK_SIZE_ROW']), 1, 1)
+- jobs 间拆分 col
+  - grid = lambda META: (triton.cdiv(n_rows, META['BLOCK_SIZE_ROW']), triton.cdiv(n_cols, META['BLOCK_SIZE_COL']), 1)
+
 ## 期待
 
 最后，本文所描述的优化行为都比较 naive，并不包含：
 
-- 使用硬件特性优化
 - 修改lowering源码
+- 使用硬件特性优化
 
-这两者和硬件相关性太大了，各家有各家的说法，再说我也确实不太懂硬件架构（修改源码的地方这里也不好放出来），只能用此文记录下自己naive的优化行为，期望有更多大佬分享优化的经验。
+这两者常常和硬件结构相关，各家有各家的说法，再说我也确实不太懂硬件架构（修改源码的地方这里也不好放出来），只能用此文记录下自己naive的优化行为，期望有更多大佬分享优化的经验。
+
+当然也有些简易的优化方法，例如：（在 SIMD 架构上的 load 和 store 操作并没有 SIMT 架构上的 `memory-coalecse` 优化）
+
+- 增大单次连续 IO 量：对于 `load %ptr, %mask, %other` 可以转化为 `select %mask, %load, %other` 来确保 `load`(IO 操作) 的高吞吐。
+- 减小单次真实 IO 量：当存在大量地址连续的元素为 constancy(相同值) 时，可以先对 `extract_slice %ptr`，再 `load`，后续 broadcast 或 expand_shape 都行。

@@ -593,6 +593,13 @@ ArrayAttr tmp = ArrayAttr::get(context, mappings)
   - setAttr(StringRef name, Attribute value)
     - name可以`constexpr llvm::StringLiteral` 形式定义在头文件中
     - funcOp→setAttr(attrName, IntegerAttr::get(intType, 1));
+    - 例如
+
+    ```cpp
+    // 为 `arith::FastMathInterface op` 设置 `fastmathAtrr`
+    op->setAttr(op.getFastMathAttrName(), mlir::arith::FastMathFlagsAttr::get(
+        op->getContext(), arith::FastMathFlags::fast));
+    ```
 
   - removeAttr
 
@@ -4036,7 +4043,7 @@ class FoldMaskAccessPattern : public OpRewritePattern<OpTy> {
   }
 ```
 
-但是直接修改 `operandSegmentSizes` 属性的方法十分危险，且不利于维护，建议使用 `MutableOperandRange`(见 `mlir/include/mlir/IR/ValueRange.h`) 直接丢弃该 operand，同时也会修改 `operandSegmentSizes` 属性
+但是**直接修改 `operandSegmentSizes` 属性的方法十分危险，且不利于维护**，建议使用 `MutableOperandRange`(见 `mlir/include/mlir/IR/ValueRange.h`) 直接丢弃该 operand，同时也会修改 `operandSegmentSizes` 属性
 
 ```cpp
     // Then region.
