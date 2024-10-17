@@ -136,19 +136,32 @@ find path/to/your/project -name '*.cpp' -o -name '*.h' | xargs clang-format -i
 
 `ConversionPattern` 相比 `RewriterPattern` 需要多传递一个 `adaptor`
 
-1.OpAdaptor的作用：封装了op的operands
-
-2.ConversionPattern和RewritePatter的区别
-
-- ConversionPattern常配合 **applyFullConversion/applyPartialConversion** 使用，用于dialect2dialect的op之间变换
+OpAdaptor的作用：封装了op的operands
 
 CoversionPattern 可能需要运行多遍直到 legal，过程中可能存在非法的 ir，所以推荐从 adaptor 中去取 operand 的信息。
 
 > You are supposed to lookup operands in the adaptor during a dialect conversion. [来自](https://github.com/llvm/llvm-project/pull/107221)。
 
-但 RewritePattern 通常需要一遍完成，所以不能用在 dialect-to-dialect 的 conversion 中。
+## ConversionPattern和RewritePattern
 
-- RewritePattern一般用于优化变换，常配合 **applyPatternsAndFoldGreedily** 使用
+1.相同点
+
+- 都会依赖对应的 `rewrite pattern driver`
+- pattern 写好后都会分配 `benefit` 并使用 `RewritePatternSet` 收集，然后 apply
+
+2.不同点
+
+- ConversionPattern
+  - 延时生效，往往需要多次才能legal，所以不要获取其他op的信息，可能还处于改变过程中
+  - adaptor, type converter, ConversionPatternRewriter
+  - 常配合 **applyFullConversion/applyPartialConversion** 使用，用于dialect2dialect的op之间变换
+
+- RewritePattern
+  - 即时生效，通常需要一遍完成，所以不能用在 dialect-to-dialect 的 conversion 中
+  - PatternRewriter
+  - 一般用于优化变换，常配合 **applyPatternsAndFoldGreedily** 使用
+  - 当 pattern 可能 failed 时，千万不能修改 ir(create / earse)
+  - 修改ir之前，一定要确保pattern可以成功
 
 ```cpp
 // OpConversionPattern
@@ -4080,6 +4093,10 @@ public:
 ```
 
 常见用法：
+
+```bash
+mlir/include/mlir/Dialect/Utils/StaticValueUtils.h
+```
 
 1.Attribute / Value 转为 OpFoldResult
 
