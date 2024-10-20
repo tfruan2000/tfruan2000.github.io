@@ -99,6 +99,7 @@ cuda和triton编程模式对比
 OpenAI [Triton](https://github.com/triton-lang/triton/tree/main) 是什么？这个问题很多大佬都已经回答过了，阅读完以下 blog 相信大家会有个基础的理解
 
 - 杨军老师的 [谈谈对OpenAI Triton的一些理解](https://zhuanlan.zhihu.com/p/613244988)，帮助大家建立一个宏观印象
+- [OpenAI/Triton MLIR 迁移工作简介](https://superjomn.github.io/posts/triton-mlir-publish/)，对 triton 的架构有个宏观介绍。
 - 董鑫大佬的 [如何入门 OpenAI Triton 编程?](https://www.zhihu.com/question/622685131/answer/3217107882)，帮助了解更多关于语法上的信息
 - BobHuang大佬的 [浅析 Triton 执行流程](https://zhuanlan.zhihu.com/p/712640431)，帮助初学者大致明白一段 python 程序如何进入 triton pipeline，然后跑起来。
 - 理解triton语法的repo：[triton-puzzles](https://github.com/srush/Triton-Puzzles)
@@ -651,9 +652,10 @@ dumps the IR before every MLIR pass Triton runs
 - 调整拆分大小：BLOCK_SIZE
 - num_stages调整流水级数
 
-2.修改算法实现。
+2.修改kernel实现
 
-每个算子的理论计算量是固定的，一般都是有冗余的IO。
+- 每个算子的理论计算量是固定的，一般都是有冗余的IO。
+- 多用make_tensor_ptr，产生`!tt.ptr<tensor<xxxx>>`，直接是一片连续的数字
 
 3.添加新的下降pattern
 

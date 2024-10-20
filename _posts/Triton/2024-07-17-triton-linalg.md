@@ -1592,7 +1592,7 @@ Triton-Linalg 的 `AxisInfo` 主要使用 `AxisInfoExt` 类来记录信息。这
 
 - hint
 
-hint 的方式是人为在写 kernel 时通过 `max_contiguous`、`max_constany`、`multiple_of` 等 [hint op](https://triton-lang.org/main/python-api/triton.language.html#compiler-hint-ops) 来提示编译器数据的特殊性，以指导编译器的下降行为。
+hint 的方式是人为在写 kernel 时通过 `max_contiguous`、`max_constany`、`multiple_of` 等 [hint op](https://triton-lang.org/main/python-api/triton.language.html#compiler-hint-ops) 来提示编译器数据的特殊性，以指导编译器的下降行为。人为给定的hint的优先级高于分析出来的。
 
 ```cpp
 // lib/Dialect/Triton/Interfaces/InferAxisInfoInterface.cpp
@@ -1623,6 +1623,11 @@ if (Attribute attr = op->getAttr("tt.constancy")) {
 ![alt text](/assets/img/blog/img_triton_linalg/axisInfo.png)
 
 引自：[浅谈寒武纪开源的Triton-Linalg编译器前端](https://zhuanlan.zhihu.com/p/706401510)
+
+### 使用 AxisInfo 优化访存行为
+
+- 分析连续性后，例如存在相同的element，下降成 `extract_slice + load + expand_shape + store`
+- 当分析不出连续性，至少为带mask的兜底优化：不带mask，都load上来，然后用`select %mask %load %other`来获得真实值。这个优化在simt中收益或许不大，因为有memory-coalesce
 
 ## MaskTracker
 

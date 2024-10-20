@@ -1,5 +1,5 @@
 ---
-title: OpenAI Triton 源码走读[ttir pass]
+title: OpenAI Triton 源码走读[transforms in ttir]
 author: tfruan
 date: 2024-09-08 12:00:00 +0800
 categories: [Triton]
@@ -548,5 +548,3 @@ static constexpr StringLiteral loopUnrollFactorAttrName("tt.loop_unroll_factor")
 3.为什么不支持affine.for
 
 在 mlir 中， affine.for 也支持了 unroll pattern，但目前在 triton 中并不会下降出 affine op(没有场景)，所以当前该pass的锚点是 `scf.for`。
-
-TBC

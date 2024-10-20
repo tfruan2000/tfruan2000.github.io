@@ -717,6 +717,40 @@ TreeNode* buildTree(vector<int>& preorder, vector<int>& inorder) {
 }
 ```
 
+## 二分
+
+1.[LeetCode4. 寻找两个正序数组的中位数](https://leetcode.cn/problems/median-of-two-sorted-arrays/description/?envType=study-plan-v2&envId=top-100-liked)
+
+给定两个大小分别为 m 和 n 的正序（从小到大）数组 nums1 和 nums2。请你找出并返回这两个正序数组的 中位数 。
+
+算法的时间复杂度应该为 O(log (m+n)) 。
+
+```cpp
+// k : 合并后的第 k 个元素
+int findVal(vector<int>& nums1, int i, vector<int>& nums2, int j, int k) {
+  int size1 = nums1.size();
+  int size2 = nums2.size();
+  if (i == size1) return nums2[j + k - 1];
+  if (j == size2) return nums1[i + k - 1];
+  if (k == 1) return min(nums1[i], nums2[j]);
+  int si = min(size1, i + k / 2);
+  int sj = min(size2, j + k / 2);
+  if (nums1[si - 1] < nums2[sj - 1]) {
+    return findVal(nums1, si, nums2, j, k - (si - i));
+  }
+  return findVal(nums1, i, nums2, sj, k - (sj - j));
+}
+double findMedianSortedArrays(vector<int>& nums1, vector<int>& nums2) {
+  int len = nums1.size() + nums2.size();
+  if (len % 2 == 0) {
+    int l = findVal(nums1, 0, nums2, 0, len / 2);
+    int r = findVal(nums1, 0, nums2, 0, len / 2 + 1);
+    return (double) (l + r) / 2;
+  }
+  return (double) findVal(nums1, 0, nums2, 0, len / 2 + 1);
+}
+```
+
 ## 回溯
 
 前进一步 + 函数 + 后退一步
@@ -866,6 +900,134 @@ vector<vector<string>> partition(string &s) {
   n = s.size();
   func(s, 0);
   return  resVec;
+}
+```
+
+6.LeetCode 51 N皇后
+
+将n个“皇后”放到n*n的棋牌上，要求互相不攻击。“皇后”会攻击同行、同列、同对角线上的其它棋子。
+
+```cpp
+vector<vector<string>> res;
+vector<bool> checkCol, check1, check2;
+int total;
+bool isVaild(vector<string> &board, int row, int col) {
+  return !(checkCol[col] || check1[total + row - col - 1] || check2[row + col]);
+}
+void search(vector<string> &board, int row) {
+  if (row == total) {
+    res.push_back(board);
+    return;
+  }
+  for (int col = 0; col < total; ++col) {
+    if (isVaild(board, row, col)) {
+      board[row][col] = 'Q';
+      checkCol[col] = check1[total + row - col - 1] = check2[row + col] = true;
+      search(board, row + 1);
+      board[row][col] = '.';
+      checkCol[col] = check1[total + row - col - 1] = check2[row + col] = false;
+    }
+  }
+}
+vector<vector<string>> solveNQueens(int n) {
+  vector<string> board(n, string(n, '.'));
+  total = n;
+  checkCol = vector<bool>(n, false);
+  check1 = check2 = vector<bool>(2 * n - 1, false);
+  search(board, 0);
+  return res;
+}
+```
+
+7.pdd笔试：有n个城市，n-1条城市之间的路，到一个城市收获开心值，走一条路掉开心值，求最大的开心值
+
+```cpp
+int getMaxB(vector<int> &an, unordered_map<int, unordered_map<int, int>> &map,
+            vector<bool> &visited, vector<int> &dp) {
+  if (dp[u] != -1) {
+    return dp[u];
+  }
+  int maxB = 0;
+  for (auto [v, w] : map[u]) {
+    if (visited[v]) continue;
+    visited[v] = true;
+    int benefit = an[v] - w + getMaxB(an, map, visited, v, dp);
+    maxB = max(maxB, benefit);
+    visited[v] = false; // 回溯
+  }
+  dp[u] = maxB;
+  return maxB;
+}
+
+int main() {
+  int n;
+  cin >> n;
+  vector<int> an(n); // 到一个城市的开心值
+  for (int i = 0; i < n; ++i) {
+    cin >> an[i];
+  }
+  unordered_map<int, unordered_map<int, int>> map;
+  for (int i = 0; i < n - 1; ++i) {
+    int u, v, w;
+    cin >> u >> v >> w;
+    u--;
+    v--;
+    map[u][v] = w;
+    map[v][u] = v;
+  }
+  int res = -1;
+  // 遍历开始
+  for (int i = 0; i < n; ++i) {
+    vector<bool> visited(n, false);
+    vector<int> dp(n, -1);
+    visited[i] = true;
+    int tmp = an[i] + getMaxB(an, map, visited, dp);
+    res = max(res, tmp);
+  }
+  cout << res;
+  return 0;
+}
+```
+
+其实这种思想并不能过多少，应该优化为下面的代码
+
+```cpp
+int res = INT_MIN;
+int dfs(int curr, int parent, vector<int> &an, unordered_map<int, unordered_map<int, int>> &map) {
+  int maxB = an[curr];
+  int max_path1 = 0, max_path2 = 0; // 到 curr 点的最长和次长
+  for (auto [u, w] : map[curr]) {
+    if (u == parent) continue;
+    int subMax = dfs(u, curr, an, map) - w;
+    if (subMax > max_path1) {
+      max_path1, max_path2 = subMax, max_path1;
+    } else if (subMax > max_path2) {
+      max_path2 = subMax;
+    }
+    maxB += max_path1; // 从 curr 出发的最长
+    res = max(res, maxB + max_path2);
+    return maxB;
+  }
+}
+
+int main() {
+  int n;
+  cin >> n;
+  vector<int> an(n); // 到一个城市的开心值
+  for (int i = 0; i < n; ++i) {
+    cin >> an[i];
+  }
+  unordered_map<int, unordered_map<int, int>> map;
+  for (int i = 0; i < n - 1; ++i) {
+    int u, v, w;
+    cin >> u >> v >> w;
+    u--;
+    v--;
+    map[u][v] = w;
+    map[v][u] = v;
+  }
+  dfs(0, -1, an, map);
+  return res;
 }
 ```
 
@@ -1498,13 +1660,13 @@ public:
     int res = (*iter).second;
     values.push_front(*iter);
     // 更新
-    values.earse(iter);
+    values.erase(iter);
     cache[key] = values.begin();
     return res;
   }
   void put(int key, int value) {
     if (cache.contains(key)) {
-      values.earse(cache[key]);
+      values.erase(cache[key]);
     } else if (cache.size() == capacity) {
       // 删掉该废弃的
       cache.erase(values.back().first);
@@ -1521,38 +1683,7 @@ private:
 }
 ```
 
-```cpp
-using CacheValues = std::list<std::pair<int, int>>;
-class LRUCache {
-public:
-  LRUCache(int capacity) : capacity(capacity) {}
-  int get(int key) {
-    if (!cache.contains(key)) return -1;
-    auto iter = cache[key];
-    auto val = *iter;
-    values.push_front(val);
-    values.erase(iter);
-    cache[key] = values.begin();
-    return val.second;
-  }
-  void put(int key, int value) {
-    if (cache.contains(key)) {
-      values.erase(cache[key]);
-    } else if (values.size() == capacity) {
-      cache.erase(values.back().first);
-      values.pop_back();
-    }
-    values.push_front({key, value});
-    cache[key] = values.begin();
-  }
-
-private:
-  const int capacity;
-  unordered_map<int, CacheValues::iterator> cache; // key, value iter
-  CacheValues values;
-};
-
-2.LeetCode208. 实现 Trie (前缀树)
+3.LeetCode208. 实现 Trie (前缀树)
 
 ```cpp
 class TrieNode {
@@ -1604,5 +1735,54 @@ public:
     }
 private:
     TrieNode *root;
+};
+```
+
+4.LeetCode211. 添加与搜索单词，搜索时 `.` 可以表示任意一个字符
+
+```cpp
+struct TrieNode {
+  bool isWord;
+  unordered_map<char, TrieNode*> childs;
+  TrieNode() : isWord(false) {}
+};
+class WordDictionary {
+private:
+  TrieNode *root;
+public:
+  WordDictionary() {
+    root = new TrieNode();
+  }
+
+  void addWord(string word) {
+    TrieNode *curr = root;
+    for (char c : word) {
+      if (!(curr->childs).contains(c)) {
+        (curr->childs)[c] = new TrieNode;
+      }
+      curr = (curr->childs)[c];
+    }
+    curr->isWord = true;
+  }
+
+  bool search_new(string &word, int idx, TrieNode *curr) {
+    int size = word.size();
+    if (idx == size) return curr->isWord;
+    char c = word[idx];
+    if (c == '.') {
+      for (auto [cc, child] : curr->childs) {
+        if (search_new(word, idx + 1, child))
+          return true;
+      }
+      return false;
+    }
+    if ((curr->childs).contains(c))
+      return search_new(word, idx + 1, (curr->childs)[c]);
+    return false;
+  }
+  bool search(string word) {
+    TrieNode *curr = root;
+    return search_new(word, 0, curr);
+  }
 };
 ```
