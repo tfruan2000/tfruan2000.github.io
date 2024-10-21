@@ -48,7 +48,7 @@ TritonGPU Dialect 这一层的 IR的 tensor 表示将带有 Layout 的 Attr，�
 该layout中主要对象为：
 
 - vec：同行的元素进行swizzle时，连续vec个为一组
-- perPhase：一次 swizzling phase 处理的 row 数。连续的 perPhase 行用相同的swizzle方法。
+- perPhase：一次 swizzling phase 处理的 row 数。连续的 perPhase 行用相同的swizzle方法
 - maxPhase：swizzling phase的个数
 - order：表明哪一个为主序，[1, 0] 为行主序，同行相邻元素地址连续
 - hasLeadingOffset：默认为false，Hopper MMAv3为true
@@ -103,7 +103,7 @@ swizzle 最基础的方法就是地址 与 phase_id 进行 xor。
 
 - #shared<{vec=2, perPhase=1, maxPhase=4, order=[1,0]}>
 
-元素以 2(vec) 个为一组，进行 xor。 `out[r][c] = in[r][(c / 2) ^ r) * 2 + (c % 2)]`
+相邻 2(vec) 元素为一组，进行 xor。 `out[r][c] = in[r][(c / 2) ^ r) * 2 + (c % 2)]`
 
 ```text
 [[(0:0),(0:1),(0:2),(0:3)]  // phase 0
@@ -185,8 +185,6 @@ std::optional<LinearLayout> toLinearLayout(ArrayRef<int64_t> shape) const;
 
 最常见的 layout，结合 `AxisInfoAnalysis` 获得 load 和 store 的访存行为，再用来访存合并(memory coalescing)，使得访存行为更加高效。
 
-> 一个 warp 中的所有 thread 在同一时间点只能执行相同的指令，所以需要访问的内存越连续，最后 load/store transactions 的数量就越少。配合 shared layout 来调整数据分布，减少 transactions。
-
 An encoding where each warp owns a contiguous portion of the target tensor. This is typically the kind of data layout **used to promote memory coalescing in LoadInst and StoreInst.**
 
 - 基础概念
@@ -195,18 +193,17 @@ An encoding where each warp owns a contiguous portion of the target tensor. This
 
 <!-- ![block_layout](/assets/img/blog/img_triton_survey/cta_warp_thread.png) -->
 
-- sizePerThread = [1, 4]：每个线程处理数据Size
+- sizePerThread = [1, 4]：每个线程处理的 **连续排布** 数据数目
 - threadsPerWarp = [4, 8]： warp内线程的布局
 - warpsPerCTA = [1, 1]：thread block内warp的布局
 - order = [1, 0]：先访问dim1，再访问dim0
 
-> Triton 会优先 `Contiguity` 更大的维度， `Contiguity`  信息一般来自于使用 `tl.max_contiguous(input, values)` 人为告知编译器，这意味着 input[i] 中每 values[i] 个相邻元素是连续的。
-
-该BLock访存模式一次能处理(1x4x1, 8x4) = (4, 32)规模的shape。如下：
+该BLock访存模式：每行由8个thread负责访问，每个thread会访问连续4个元素，所以一次能处理(1x4x1, 8x4x1) = (4, 32)规模的shape。如下：
 
 ```bash
 $ triton-tensor-layout -l "#triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [4, 8], warpsPerCTA = [1, 1], order = [1, 0]}>" -t "tensor<4x32xf16>"
 # T0:0,  T0:1,  T0:2,  T0:3 表示 T0 一次处理4个连续数组成的块
+Print layout attribute: #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [4, 8], warpsPerCTA = [1, 1], order = [1, 0]}>
 [[ T0:0,  T0:1,  T0:2,  T0:3,  T1:0,  T1:1,  T1:2,  T1:3,  T2:0,  T2:1,  T2:2,  T2:3,  T3:0,  T3:1,  T3:2,  T3:3,  T4:0,  T4:1,  T4:2,  T4:3,  T5:0,  T5:1,  T5:2,  T5:3,  T6:0,  T6:1,  T6:2,  T6:3,  T7:0,  T7:1,  T7:2,  T7:3]
 [  T8:0,  T8:1,  T8:2,  T8:3,  T9:0,  T9:1,  T9:2,  T9:3, T10:0, T10:1, T10:2, T10:3, T11:0, T11:1, T11:2, T11:3, T12:0, T12:1, T12:2, T12:3, T13:0, T13:1, T13:2, T13:3, T14:0, T14:1, T14:2, T14:3, T15:0, T15:1, T15:2, T15:3]
 [ T16:0, T16:1, T16:2, T16:3, T17:0, T17:1, T17:2, T17:3, T18:0, T18:1, T18:2, T18:3, T19:0, T19:1, T19:2, T19:3, T20:0, T20:1, T20:2, T20:3, T21:0, T21:1, T21:2, T21:3, T22:0, T22:1, T22:2, T22:3, T23:0, T23:1, T23:2, T23:3]
@@ -214,7 +211,7 @@ $ triton-tensor-layout -l "#triton_gpu.blocked<{sizePerThread = [1, 4], threadsP
 ```
 
 但若输入op的shape为(8, 32)，那么让每个thread处理两个连续块即可，即第一个thread处理(0, 0:3), (4, 0:3)两个块。
-<!--
+
 ```bash
 $ triton-tensor-layout -l "#triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [4, 8], warpsPerCTA = [1, 1], order = [1, 0]}>" -t "tensor<8x32xf16>"
 Print layout attribute: #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [4, 8], warpsPerCTA = [1, 1], order = [1, 0]}>
@@ -226,7 +223,16 @@ Print layout attribute: #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerW
 [  T8:4,  T8:5,  T8:6,  T8:7,  T9:4,  T9:5,  T9:6,  T9:7, T10:4, T10:5, T10:6, T10:7, T11:4, T11:5, T11:6, T11:7, T12:4, T12:5, T12:6, T12:7, T13:4, T13:5, T13:6, T13:7, T14:4, T14:5, T14:6, T14:7, T15:4, T15:5, T15:6, T15:7]
 [ T16:4, T16:5, T16:6, T16:7, T17:4, T17:5, T17:6, T17:7, T18:4, T18:5, T18:6, T18:7, T19:4, T19:5, T19:6, T19:7, T20:4, T20:5, T20:6, T20:7, T21:4, T21:5, T21:6, T21:7, T22:4, T22:5, T22:6, T22:7, T23:4, T23:5, T23:6, T23:7]
 [ T24:4, T24:5, T24:6, T24:7, T25:4, T25:5, T25:6, T25:7, T26:4, T26:5, T26:6, T26:7, T27:4, T27:5, T27:6, T27:7, T28:4, T28:5, T28:6, T28:7, T29:4, T29:5, T29:6, T29:7, T30:4, T30:5, T30:6, T30:7, T31:4, T31:5, T31:6, T31:7]]
-``` -->
+```
+
+当 `sizePerThread = [2, 4]` 时也可以一次处理完(8, 32)的数据，与上面那种执行两边的方法区别上，layout在 row 上会连续。
+
+```bash
+[[ T0:0,  T0:1,  T0:2,  T0:3,  T1:0,  T1:1,  T1:2,  T1:3,  T2:0,  T2:1,  T2:2,  T2:3,  T3:0,  T3:1,  T3:2,  T3:3,  T4:0,  T4:1,  T4:2,  T4:3,  T5:0,  T5:1,  T5:2,  T5:3,  T6:0,  T6:1,  T6:2,  T6:3,  T7:0,  T7:1,  T7:2,  T7:3]
+[  T0:4,  T0:5,  T0:6,  T0:7,  T1:4,  T1:5,  T1:6,  T1:7,  T2:4,  T2:5,  T2:6,  T2:7,  T3:4,  T3:5,  T3:6,  T3:7,  T4:4,  T4:5,  T4:6,  T4:7,  T5:4,  T5:5,  T5:6,  T5:7,  T6:4,  T6:5,  T6:6,  T6:7,  T7:4,  T7:5,  T7:6,  T7:7]
+[  T8:0,  T8:1,  T8:2,  T8:3,  T9:0,  T9:1,  T9:2,  T9:3, T10:0, T10:1, T10:2, T10:3, T11:0, T11:1, T11:2, T11:3, T12:0, T12:1, T12:2, T12:3, T13:0, T13:1, T13:2, T13:3, T14:0, T14:1, T14:2, T14:3, T15:0, T15:1, T15:2, T15:3]
+...
+```
 
 - memory coalesce
 
@@ -248,6 +254,30 @@ memory-coalesce 后将会让每个 thread 处理的数据更多，这样一次�
 
 用来指导 op 下降到特殊指令的 attr。
 
+1.MMA Layout
+
+表示 Tensor Core 中 MMA 指令结果的 data layout，一般可以直接对应到 PTX 指令中相应的数据排布需求。
+
+> 和硬件相关很大，这里不展开
+
+2.DotOperand Layout
+
+表示 dotOp 的输入的 layout。主要包含 `opIdx` 和 `parent` 两个信息，
+
+- opIdx ：用来标识 dotOp 的操作数
+  - opIdx=0 表示 DotOp 的 $a
+  - opIdx=1 表示 DotOp 的 $b
+- parent：决定了 DotOperand 的布局方式
+  - MMA Layout（如果 DotOp lower 到 MMA 指令）
+  - Blocked Layout（如果 DotOp lower 到 FMA 指令）
+
+## Slice Layout
+
+Slice Layout 通过给定的 parent 布局和 dim 维度来压缩指(squeezing)定维度。
+
+- 如果 dim = 0，则会将不同列的数据组合在一起形成新的 layout
+- 如果 dim = 1，则会将不同行的数据组合在一起形成心的 layout
+
 ## linear layout
 
 类似 CUTLASS v3 中的 CuTe Layout，在 [PR](https://github.com/triton-lang/triton/pull/3794) 中第一次引入，用于表示生成 indices 的行为。
@@ -260,8 +290,9 @@ memory-coalesce 后将会让每个 thread 处理的数据更多，这样一次�
 
 ```bash
 $ triton-tensor-layout -l "#triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [4, 8], warpsPerCTA = [4, 1], order = [1, 0]}>" -t "tensor<16x16xf16>"
-
 Print layout attribute: #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [4, 8], warpsPerCTA = [4, 1], order = [1, 0]}>
+# 每行用8个thread，每行中每个thread会负责连续的4个元素，但一行只有16个元素，所以4个thread就能遍历完一遍了
+# 因此 T0 和 T4 都会访问第0行的前四个元素
 [[  T0:0|  T4:0,   T0:1|  T4:1,   T0:2|  T4:2,   T0:3|  T4:3,   T1:0|  T5:0,   T1:1|  T5:1,   T1:2|  T5:2,   T1:3|  T5:3,   T2:0|  T6:0,   T2:1|  T6:1,   T2:2|  T6:2,   T2:3|  T6:3,   T3:0|  T7:0,   T3:1|  T7:1,   T3:2|  T7:2,   T3:3|  T7:3]
 [   T8:0| T12:0,   T8:1| T12:1,   T8:2| T12:2,   T8:3| T12:3,   T9:0| T13:0,   T9:1| T13:1,   T9:2| T13:2,   T9:3| T13:3,  T10:0| T14:0,  T10:1| T14:1,  T10:2| T14:2,  T10:3| T14:3,  T11:0| T15:0,  T11:1| T15:1,  T11:2| T15:2,  T11:3| T15:3]
 [  T16:0| T20:0,  T16:1| T20:1,  T16:2| T20:2,  T16:3| T20:3,  T17:0| T21:0,  T17:1| T21:1,  T17:2| T21:2,  T17:3| T21:3,  T18:0| T22:0,  T18:1| T22:1,  T18:2| T22:2,  T18:3| T22:3,  T19:0| T23:0,  T19:1| T23:1,  T19:2| T23:2,  T19:3| T23:3]
@@ -284,10 +315,16 @@ Print layout attribute: #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerW
 
 ```bash
 $ triton-tensor-layout -l "#triton_gpu.shared<{vec = 2, perPhase = 1, maxPhase = 4, order = [1,0], hasLeadingOffset = false}>" -t "tensor<4x8xf16>"
-
 Print layout attribute: #triton_gpu.shared<{vec = 2, perPhase = 1, maxPhase = 4, order = [1, 0], hasLeadingOffset = false}>
 [[(0:0),(0:1),(0:2),(0:3),(0:4),(0:5),(0:6),(0:7)]
 [ (1:2),(1:3),(1:0),(1:1),(1:6),(1:7),(1:4),(1:5)]
 [ (2:4),(2:5),(2:6),(2:7),(2:0),(2:1),(2:2),(2:3)]
 [ (3:6),(3:7),(3:4),(3:5),(3:2),(3:3),(3:0),(3:1)]]
 ```
+
+默认打印是每个 thread 对应的 tensor 上的元素，默认是从 tensor 角度出发来打印每个 thread 对应的 tensor 上的元素；
+也可以增加 `-use-hw-view` 以获取 warps, threads 角度获得更多信息。
+
+用法细节请自行阅读：bin/triton-tensor-layout.cpp 以及 lib/Dialect/TritonGPU/IR/Dialect.cpp。
+
+# ttir-2-ttgir

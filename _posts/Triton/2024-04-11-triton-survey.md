@@ -863,9 +863,163 @@ dot_scaled -> semantic.dot_scaled -> tl.tensor(builder.create_dot_scaled(...)）
 
 ## layout
 
-Layout：定义了Data是如何被Thread处理。这种layout attr在lowering过程中被传递，用于描述op的拆分映射关系
+TritonGPU Dialect 这一层的 IR的 tensor 表示将带有 Layout 的 Attr，该 Attr 定义了 Data 是如何被 Thread 并行处理。这种layout attr在lowering过程中被传递。
 
-[TODO]
+自 [[RFC] To generalize TritonGPU dialect for GPU of different vendors](https://github.com/triton-lang/triton/issues/2639) 后， TritonGPU Dialect 中的 Layout Attribute 正式统一为下图：
+
+![TritonGPU Attr](/assets/img/blog/img_triton_pass/layout_attr.png)
+
+当前最重要的也是 distributed layout 和 shared layout。
+
+### shared layout
+
+表示了一种 tensor 编码模式，用于指导如何进行 `swizzle`，使得不同 thread 在访问 tensor(on shared memory) 上的元素时尽量避免 bank conflict。
+
+> swizzle：调整数据在 shared memory 上的存储位置，保证 thread 访问时不出现 bank conflict。
+
+该layout中主要对象为：
+
+- vec：同行的元素进行swizzle时，连续vec个为一组
+- perPhase：一次 swizzling phase 处理的 row 数。连续的 perPhase 行用相同的swizzle方法
+- maxPhase：swizzling phase的个数
+- order：表明哪一个为主序，[1, 0] 为行主序，同行相邻元素地址连续
+- hasLeadingOffset：默认为false，Hopper MMAv3为true
+
+swizzle 最基础的方法就是地址 与 phase_id 进行 xor。
+
+假设现在有4x4个元素需要存到 shared memory 上去，存放的初始地址为：
+
+[r, c] 上对应的元素为 (r:c)。
+
+```text
+[[(0:0),(0:1),(0:2),(0:3)]
+[ (1:0),(1:1),(1:2),(1:3)]
+[ (2:0),(2:1),(2:2),(2:3)]
+[ (3:0),(3:1),(3:2),(3:3)]]
+```
+
+- #shared<{vec=1, perPhase=1, maxPhase=4, order=[1,0]}>
+
+不同行中的地址与不同的参数 xor。`out[r][c] = in[r][c ^ r]`
+
+```text
+[[(0:0),(0:1),(0:2),(0:3)]  // phase 0 (xor with 0)
+[ (1:1),(1:0),(1:3),(1:2)]  // phase 1 (xor with 1)
+[ (2:2),(2:3),(2:0),(2:1)]  // phase 2 (xor with 2)
+[ (3:3),(3:2),(3:1),(3:0)]] // phase 3 (xor with 3)
+```
+
+- #shared<{vec=1, perPhase=2, maxPhase=4, order=[1,0]}>
+
+相邻 2 (`perPhase`) 行中的地址用相同的参数xor。`out[r][c] = in[r][c ^ (r / 2)]`
+
+```text
+[[(0:0),(0:1),(0:2),(0:3)]   // phase 0 (xor with 0)
+[ (1:0),(1:1),(1:2),(1:3)]   // phase 0 (xor with 0)
+[ (2:1),(2:0),(2:3),(2:2)]   // phase 1 (xor with 1)
+[ (3:1),(3:0),(3:3),(3:2)]]  // phase 1 (xor with 1)
+```
+
+- #shared<{vec=2, perPhase=2, maxPhase=4, order=[1,0]}>
+
+相邻 2(vec) 元素为一组，进行 xor。`out[r][c] = in[r][(c / 2) ^ (r % 2)) * 2 + (c % 2)]`
+
+```text
+[[(0:0),(0:1),(0:2),(0:3)]
+[ (1:0),(1:1),(1:2),(1:3)]
+[ (2:2),(2:3),(2:0),(2:1)]
+[ (3:2),(3:3),(3:0),(3:1)]]
+```
+
+![swizzled memory](/assets/img/blog/img_triton_survey/swizzled.png)
+
+### distributed layout
+
+distributed layout 使用映射函数描述整个 tensor 的访问模式。映射函数(layout function)会将特定的Tensor交给特定的Thread去处理(即一个layout描述整个tensor的访问模式)，达到一个**distribution**的效果
+
+distributte layout 将信息分为4个维度：
+
+- CTAs Per CGA：在 hopper 上才有用，因为 hopper 架构首次引入了 SM-to-SM
+- Warps Per CTA：CTA 内 warp 的布局（对应 `warpsPerCTA`）
+- Threads Per Warp：warp 内 thread 的布局（对应 `threadsPerWarp`）
+- Values Per Thread：一个 thread 需要处理多少元素（对应 `sizePerThread`）
+
+#### block layout
+
+最常见的 layout，结合 `AxisInfoAnalysis` 获得 load 和 store 的访存行为，再用来访存合并(memory coalescing)，使得访存行为更加高效。
+
+An encoding where each warp owns a contiguous portion of the target tensor. This is typically the kind of data layout **used to promote memory coalescing in LoadInst and StoreInst.**
+
+- 基础概念
+
+例如：`#triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [4, 8], warpsPerCTA = [1, 1], order = [1, 0]}>`
+
+- sizePerThread = [1, 4]：每个线程处理的 **连续排布** 数据数目
+- threadsPerWarp = [4, 8]： warp内线程的布局
+- warpsPerCTA = [1, 1]：thread block内warp的布局
+- order = [1, 0]：先访问dim1，再访问dim0
+
+该BLock访存模式：每行由8个thread负责访问，每个thread会访问连续4个元素，所以一次能处理(1x4x1, 8x4x1) = (4, 32)规模的shape。如下：
+
+```bash
+$ triton-tensor-layout -l "#triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [4, 8], warpsPerCTA = [1, 1], order = [1, 0]}>" -t "tensor<4x32xf16>"
+# T0:0,  T0:1,  T0:2,  T0:3 表示 T0 一次处理4个连续数组成的块
+Print layout attribute: #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [4, 8], warpsPerCTA = [1, 1], order = [1, 0]}>
+[[ T0:0,  T0:1,  T0:2,  T0:3,  T1:0,  T1:1,  T1:2,  T1:3,  T2:0,  T2:1,  T2:2,  T2:3,  T3:0,  T3:1,  T3:2,  T3:3,  T4:0,  T4:1,  T4:2,  T4:3,  T5:0,  T5:1,  T5:2,  T5:3,  T6:0,  T6:1,  T6:2,  T6:3,  T7:0,  T7:1,  T7:2,  T7:3]
+[  T8:0,  T8:1,  T8:2,  T8:3,  T9:0,  T9:1,  T9:2,  T9:3, T10:0, T10:1, T10:2, T10:3, T11:0, T11:1, T11:2, T11:3, T12:0, T12:1, T12:2, T12:3, T13:0, T13:1, T13:2, T13:3, T14:0, T14:1, T14:2, T14:3, T15:0, T15:1, T15:2, T15:3]
+[ T16:0, T16:1, T16:2, T16:3, T17:0, T17:1, T17:2, T17:3, T18:0, T18:1, T18:2, T18:3, T19:0, T19:1, T19:2, T19:3, T20:0, T20:1, T20:2, T20:3, T21:0, T21:1, T21:2, T21:3, T22:0, T22:1, T22:2, T22:3, T23:0, T23:1, T23:2, T23:3]
+[ T24:0, T24:1, T24:2, T24:3, T25:0, T25:1, T25:2, T25:3, T26:0, T26:1, T26:2, T26:3, T27:0, T27:1, T27:2, T27:3, T28:0, T28:1, T28:2, T28:3, T29:0, T29:1, T29:2, T29:3, T30:0, T30:1, T30:2, T30:3, T31:0, T31:1, T31:2, T31:3]]
+```
+
+但若输入op的shape为(8, 32)，那么让每个thread处理两个连续块即可，即第一个thread处理(0, 0:3), (4, 0:3)两个块。
+
+#### MMA Layout 和 DotOperand Layout
+
+用来指导 op 下降到特殊指令的 attr。
+
+1.MMA Layout
+
+表示 Tensor Core 中 MMA 指令结果的 data layout，一般可以直接对应到 PTX 指令中相应的数据排布需求。
+
+> 和硬件相关很大，这里不展开
+
+2.DotOperand Layout
+
+表示 dotOp 的输入的 layout。主要包含 `opIdx` 和 `parent` 两个信息，
+
+- opIdx ：用来标识 dotOp 的操作数
+  - opIdx=0 表示 DotOp 的 $a
+  - opIdx=1 表示 DotOp 的 $b
+- parent：决定了 DotOperand 的布局方式
+  - MMA Layout（如果 DotOp lower 到 MMA 指令）
+  - Blocked Layout（如果 DotOp lower 到 FMA 指令）
+
+### tools for layout
+
+在 [PR](https://github.com/triton-lang/triton/pull/4486) 中合入了一个可以打印 ttgir 上 layout 的工具 `triton-tensor-layout`，通过调用 `getLayoutStr` 来解析 RankedTensorType 中的 layout 信息，且当前已经支持了 shared layout 的 dump。例如：
+
+```bash
+$ triton-tensor-layout -l "#triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [4, 8], warpsPerCTA = [4, 1], order = [1, 0]}>" -t "tensor<16x16xf16>"
+Print layout attribute: #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [4, 8], warpsPerCTA = [4, 1], order = [1, 0]}>
+# 每行用8个thread，每行中每个thread会负责连续的4个元素，但一行只有16个元素，所以4个thread就能遍历完一遍了
+# 因此 T0 和 T4 都会访问第0行的前四个元素
+[[  T0:0|  T4:0,   T0:1|  T4:1,   T0:2|  T4:2,   T0:3|  T4:3,   T1:0|  T5:0,   T1:1|  T5:1,   T1:2|  T5:2,   T1:3|  T5:3,   T2:0|  T6:0,   T2:1|  T6:1,   T2:2|  T6:2,   T2:3|  T6:3,   T3:0|  T7:0,   T3:1|  T7:1,   T3:2|  T7:2,   T3:3|  T7:3]
+[   T8:0| T12:0,   T8:1| T12:1,   T8:2| T12:2,   T8:3| T12:3,   T9:0| T13:0,   T9:1| T13:1,   T9:2| T13:2,   T9:3| T13:3,  T10:0| T14:0,  T10:1| T14:1,  T10:2| T14:2,  T10:3| T14:3,  T11:0| T15:0,  T11:1| T15:1,  T11:2| T15:2,  T11:3| T15:3]
+[  T16:0| T20:0,  T16:1| T20:1,  T16:2| T20:2,  T16:3| T20:3,  T17:0| T21:0,  T17:1| T21:1,  T17:2| T21:2,  T17:3| T21:3,  T18:0| T22:0,  T18:1| T22:1,  T18:2| T22:2,  T18:3| T22:3,  T19:0| T23:0,  T19:1| T23:1,  T19:2| T23:2,  T19:3| T23:3]
+[  T24:0| T28:0,  T24:1| T28:1,  T24:2| T28:2,  T24:3| T28:3,  T25:0| T29:0,  T25:1| T29:1,  T25:2| T29:2,  T25:3| T29:3,  T26:0| T30:0,  T26:1| T30:1,  T26:2| T30:2,  T26:3| T30:3,  T27:0| T31:0,  T27:1| T31:1,  T27:2| T31:2,  T27:3| T31:3]
+[  T32:0| T36:0,  T32:1| T36:1,  T32:2| T36:2,  T32:3| T36:3,  T33:0| T37:0,  T33:1| T37:1,  T33:2| T37:2,  T33:3| T37:3,  T34:0| T38:0,  T34:1| T38:1,  T34:2| T38:2,  T34:3| T38:3,  T35:0| T39:0,  T35:1| T39:1,  T35:2| T39:2,  T35:3| T39:3]
+[  T40:0| T44:0,  T40:1| T44:1,  T40:2| T44:2,  T40:3| T44:3,  T41:0| T45:0,  T41:1| T45:1,  T41:2| T45:2,  T41:3| T45:3,  T42:0| T46:0,  T42:1| T46:1,  T42:2| T46:2,  T42:3| T46:3,  T43:0| T47:0,  T43:1| T47:1,  T43:2| T47:2,  T43:3| T47:3]
+[  T48:0| T52:0,  T48:1| T52:1,  T48:2| T52:2,  T48:3| T52:3,  T49:0| T53:0,  T49:1| T53:1,  T49:2| T53:2,  T49:3| T53:3,  T50:0| T54:0,  T50:1| T54:1,  T50:2| T54:2,  T50:3| T54:3,  T51:0| T55:0,  T51:1| T55:1,  T51:2| T55:2,  T51:3| T55:3]
+[  T56:0| T60:0,  T56:1| T60:1,  T56:2| T60:2,  T56:3| T60:3,  T57:0| T61:0,  T57:1| T61:1,  T57:2| T61:2,  T57:3| T61:3,  T58:0| T62:0,  T58:1| T62:1,  T58:2| T62:2,  T58:3| T62:3,  T59:0| T63:0,  T59:1| T63:1,  T59:2| T63:2,  T59:3| T63:3]
+[  T64:0| T68:0,  T64:1| T68:1,  T64:2| T68:2,  T64:3| T68:3,  T65:0| T69:0,  T65:1| T69:1,  T65:2| T69:2,  T65:3| T69:3,  T66:0| T70:0,  T66:1| T70:1,  T66:2| T70:2,  T66:3| T70:3,  T67:0| T71:0,  T67:1| T71:1,  T67:2| T71:2,  T67:3| T71:3]
+[  T72:0| T76:0,  T72:1| T76:1,  T72:2| T76:2,  T72:3| T76:3,  T73:0| T77:0,  T73:1| T77:1,  T73:2| T77:2,  T73:3| T77:3,  T74:0| T78:0,  T74:1| T78:1,  T74:2| T78:2,  T74:3| T78:3,  T75:0| T79:0,  T75:1| T79:1,  T75:2| T79:2,  T75:3| T79:3]
+[  T80:0| T84:0,  T80:1| T84:1,  T80:2| T84:2,  T80:3| T84:3,  T81:0| T85:0,  T81:1| T85:1,  T81:2| T85:2,  T81:3| T85:3,  T82:0| T86:0,  T82:1| T86:1,  T82:2| T86:2,  T82:3| T86:3,  T83:0| T87:0,  T83:1| T87:1,  T83:2| T87:2,  T83:3| T87:3]
+[  T88:0| T92:0,  T88:1| T92:1,  T88:2| T92:2,  T88:3| T92:3,  T89:0| T93:0,  T89:1| T93:1,  T89:2| T93:2,  T89:3| T93:3,  T90:0| T94:0,  T90:1| T94:1,  T90:2| T94:2,  T90:3| T94:3,  T91:0| T95:0,  T91:1| T95:1,  T91:2| T95:2,  T91:3| T95:3]
+[  T96:0|T100:0,  T96:1|T100:1,  T96:2|T100:2,  T96:3|T100:3,  T97:0|T101:0,  T97:1|T101:1,  T97:2|T101:2,  T97:3|T101:3,  T98:0|T102:0,  T98:1|T102:1,  T98:2|T102:2,  T98:3|T102:3,  T99:0|T103:0,  T99:1|T103:1,  T99:2|T103:2,  T99:3|T103:3]
+[ T104:0|T108:0, T104:1|T108:1, T104:2|T108:2, T104:3|T108:3, T105:0|T109:0, T105:1|T109:1, T105:2|T109:2, T105:3|T109:3, T106:0|T110:0, T106:1|T110:1, T106:2|T110:2, T106:3|T110:3, T107:0|T111:0, T107:1|T111:1, T107:2|T111:2, T107:3|T111:3]
+[ T112:0|T116:0, T112:1|T116:1, T112:2|T116:2, T112:3|T116:3, T113:0|T117:0, T113:1|T117:1, T113:2|T117:2, T113:3|T117:3, T114:0|T118:0, T114:1|T118:1, T114:2|T118:2, T114:3|T118:3, T115:0|T119:0, T115:1|T119:1, T115:2|T119:2, T115:3|T119:3]
+[ T120:0|T124:0, T120:1|T124:1, T120:2|T124:2, T120:3|T124:3, T121:0|T125:0, T121:1|T125:1, T121:2|T125:2, T121:3|T125:3, T122:0|T126:0, T122:1|T126:1, T122:2|T126:2, T122:3|T126:3, T123:0|T127:0, T123:1|T127:1, T123:2|T127:2, T123:3|T127:3]]
+```
 
 # pytorch-to-triton
 
