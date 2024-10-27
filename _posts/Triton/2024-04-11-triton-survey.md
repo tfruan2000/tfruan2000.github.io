@@ -166,7 +166,7 @@ triton 的[组成](https://github.com/triton-lang/triton/tree/main/python/triton
 
 以 nvgpu 为例，triton-lang 的下降流程：
 
-triton-lang -> triton dialect -> triton gpu dialect -> nvgpu dialect -> llvm ir + nvvm ir -> ptx -> cnbin
+triton-lang -> triton dialect -> triton gpu dialect -> nvgpu dialect -> llvm ir + nvvm ir -> ptx -> cubin
 
 ![triton_arch_now](/assets/img/blog/img_triton_survey/triton_arch_now.png)
 
@@ -244,7 +244,7 @@ class JITFunction(KernelInterface[T]):
             # Kernel is not cached; we have to compile.
             ...
             src = self.ASTSource(self, signature, constants, configs[0]) # ast 转 ttir
-            kernel = self.compile( # ttir 一路下降到 cnbin
+            kernel = self.compile( # ttir 一路下降到 cubin
                 src,
                 target=target,
                 options=options.__dict__,
@@ -252,7 +252,7 @@ class JITFunction(KernelInterface[T]):
             ...
         if not warmup:
             ...
-            kernel.run(...) # 调用 drive api执行cnbin
+            kernel.run(...) # 调用 drive api执行cubin
 ```
 
 `lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)`：将grid参数封装传入进去, 除了定义的kernel参数外，还会额外传入num_wraps， stages, stream等参数。

@@ -1212,8 +1212,8 @@ void runOnOperation() override {
 
 常见的apply形式:
 
-- `applyPartialConversion` ：如果结果是合法（以`ConversionTarget`参数来判断）则保留，如果非法则报错
-- `applyFullConversion` ：调用pattern对目标进行转换，直至IR满足`ConversionTarget`设置的目标合法，pattern必须成功才会产生合法的target
+- `applyPartialConversion` ：如果结果是合法（以`ConversionTarget`参数来判断）则保留。如果有未转换的illegal操作，并不会转换失败，将混合存在。
+- `applyFullConversion` ：调用pattern对目标进行转换，直至IR满足`ConversionTarget`设置的目标合法，pattern必须成功才会产生合法的target。要求所有illegal都被转换
 - `applyPatternsAndFoldGreedily`：尽可能地多次修改，pattern可以失败
 
 前两种常用于dialect conversion，需要多传入一个`ConversionTarget`参数，greedilyConversion一般用于优化pass
@@ -1369,7 +1369,10 @@ converter.addConversion([&]ToyIntegerType t) -> std::optional<Integer> {
 }
 ```
 
+- `addConversion` ：定义通用的类型转换规则，当调用 `convertType` 方法时，会依次检查 `addConversion` 中注册的规则。
+  - 当调用 `getTypeConverter()->convertType(inputType)` 时启用
 - `addTargetMaterialization` ：sourceType→targetType
+  - 例如，op2 以 op1 作为 operand，当 op1 和 op2 的 resType 被转换后， op2 期望其 operandType 和 op1 给出的并不符合，所以就需要将中间类型值转换为目标类型值。
 - `addSourceMaterialization` ：targetType→sourceType
 - `addArgumentMaterialization`
 
