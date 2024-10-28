@@ -281,8 +281,10 @@ SemiLattice 是用来做两个 program point 的 data flow values 的 交汇(mee
 ## Dataflow Framework
 
 ```bash
-mlir/include/mlir/Analysis/DataFlowFramework.h
-mlir/lib/Analysis/DataFlowFramework.cpp
+include/mlir/Analysis/DataFlowFramework.h
+include/mlir/Analysis/DataFlow/
+lib/Analysis/DataFlowFramework.cpp
+lib/Analysis/DataFlow/
 ```
 
 1.ChangeResult
@@ -302,11 +304,28 @@ enum class [[nodiscard]] ChangeResult {
 
 MLIR 中的 ProgramPoint 是一个 `PointerUnion`，可以是 `Operation *, Value, Block *`
 
-3.DataFlowSolver
+3.AnalysisState
 
-实现 child data-flow analyses，使用的是 fixedpoint iteration 算法。
+所有程序状态的基类，附加到程序点并随着分析迭代而演变的数据流信息，例如经典的 `AbstractSparseLattice`。
 
-一直维护 `AnalysisState` 和 `ProgramPoint` 信息。
+```cpp
+class AnalysisState {
+public:
+  AnalysisState(ProgramPoint point) : point(point) {}
+　...
+protected:
+  virtual void onUpdate(DataFlowSolver *solver) const {}
+  ...
+  ProgramPoint point;
+  friend class DataFlowSolver;
+};
+```
+
+4.DataFlowSolver
+
+实现 child data-flow analyses，使用的是 fixedpoint iteration 算法。一直维护 `AnalysisState` 和 `ProgramPoint` 信息。
+
+> 多种 Analysis 是同时运行的，但结果会互相影响
 
 数据流分析的流程：
 
@@ -325,6 +344,8 @@ std::unique_ptr<mlir::DataFlowSolver> createDataFlowSolver() {
 ```
 
 (2) 配置并运行分析，直到达到设置的 fixpoint
+
+solver根据IR来调用子分析(children analysis)，直到达到 fixpoint
 
 ```cpp
 if (failed(solver->initializeAndRun(root))) {
@@ -346,7 +367,7 @@ LogicalResult DataFlowSolver::initializeAndRun(Operation *top) {
       return failure();
   }
 
-  // 一直运行，直到 fixpoint
+  // 执行 fixpoint 迭代：一直运行，直到 fixpoint
   do {
     while (!worklist.empty()) {
       auto [point, analysis] = worklist.front();
@@ -366,7 +387,9 @@ LogicalResult DataFlowSolver::initializeAndRun(Operation *top) {
 }
 ```
 
-理论上一定会到达 fixpoint，每个 analysis 都获得一个稳定的 Lattice。如果该过程的时间过慢，说明相关的 analysis 处理 ProgramPoint 的行为存在问题。
+理论上一定会到达 fixpoint，每个 analysis 都获得一个稳定的 Lattice。当 ProgramPoint 的 AnalysisState 发生变化时，这个信息会被添加到 worklist，这样不断迭代。
+
+如果该过程的时间过慢，说明相关的 analysis 处理 ProgramPoint 的行为存在问题。
 
 (3) 从 solver 中 query analysis state results
 
@@ -374,6 +397,8 @@ LogicalResult DataFlowSolver::initializeAndRun(Operation *top) {
 // lookupState 可能返回 null
 const auto analysisState = solver->lookupState<xxxxx>(op)
 ```
+
+analysisStates 的类型是 `DenseMap<std::pair<ProgramPoint, TypeID>, std::unique_ptr<AnalysisState>>`，表示每个 `std::pair<ProgramPoint, TypeID>`对应一个分析状态(AnalysisState)
 
 ## Liveness
 
@@ -401,6 +426,8 @@ mlir/lib/Analysis/AliasAnalysis/LocalAliasAnalysis.h
   - PartialAlias : 两个loc互相alias，但是部分重叠
   - MustAlias
 - isNO / isMay / isPartial / isMust -> bool
+
+![AliasResult](/assets/img/blog/img_mlir_note/AliasAnalysis.png)
 
 2.AliasResult alias(Value lhs, Value rhs);
 
@@ -742,7 +769,7 @@ Operation *create(const OperationState &state);
 
 - createOrFold
 
-返回值是 Value （也可以直接作为 OpFoldResult 使用)
+返回值是 Value （也可以直接作为 OpFoldResult 使用，会有一个隐式转换)
 
 创建op后立即尝试fold，一般在创建某些有xxxOp.cpp中有opFoldPattern的op时使用，例如一些arith dialect 中的op 以及 memref.dim
 
@@ -1602,6 +1629,7 @@ mlir/lib/Dialect/Affine/IR/AffineOps.cpp
 ```bash
 mlir/inlcude/mlir/IR/AffineMap.h
 mlir/lib/IR/AffineMap.cpp
+mlir/Dialect/Affine/IR/AffineOps.h
 ```
 
 - `getFilteredIdentityMap` 创建条件过滤affinemap
@@ -1681,6 +1709,19 @@ std::optional<unsigned> AffineMap::getResultPosition(AffineExpr input) const {
       return e.isFunctionOfDim(position);
     });
   }
+```
+
+- 创建 affine.max / affine.min
+
+`makeComposedFoldedAffineMin`, `makeComposedFoldedAffineMax`
+
+例如下面的代码会创建一个 affine.min affine_map<(d0) -> (256, d0)>(%operand)
+
+```cpp
+OpFoldResult c256 = rewriter.createOrFold<arith::ConstantIndexOp>(loc, 256);
+OpFoldResult minVal = mlir::affine::makeComposedFoldedAffineMin(
+    rewriter, loc, AffineMap::getMultiDimIdentityMap(2, loc.getContext()),
+    ArrayRef({getAsOpFoldResult(operand), c256}));
 ```
 
 ### MutableAffineMap
@@ -4144,10 +4185,10 @@ if (matchPattern(value, m_Constant(&attr)))
 return value;
 ```
 
-4.std::optional<int64_t> getconstantIntValue(OpFoldResult v)
+4.std::optional<int64_t> getConstantIntValue(OpFoldResult v)
 
 ```cpp
-std::optional<int64_t> getconstantIntValue(OpFoldResult v) {
+std::optional<int64_t> getConstantIntValue(OpFoldResult v) {
   if (auto val = llvm::dyn_cast_if_present<Value>(ofr)) {
     APSInt intVal;
     if (matchPattern(val, m_ConstantInt(&intVal)))

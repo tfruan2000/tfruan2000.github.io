@@ -279,7 +279,7 @@ memory-coalesce 后将会让每个 thread 处理的数据更多，这样一次�
 
 ## Slice Layout
 
-Slice Layout 通过给定的 parent 布局和 dim 维度来压缩指(squeezing)定维度。
+Slice Layout 通过给定的 parent layout 和 dim 维度来压缩指(squeezing)定维度。
 
 - 如果 dim = 0，则会将不同列的数据组合在一起形成新的 layout
 - 如果 dim = 1，则会将不同行的数据组合在一起形成新的 layout
