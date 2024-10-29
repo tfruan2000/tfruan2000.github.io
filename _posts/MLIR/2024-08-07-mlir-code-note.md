@@ -4461,7 +4461,7 @@ struct PassNamePass : public PassNamePassBase<PassNamePass> {
 
  void runOnOperation() override {
   // 根据td中的作用域来返回，如果pass的td定义的作用域是mlir::ModuleOp,则这里返回moduleOp。
-    // 如果pass.td中没有设置，则返回输入ir的top-level op
+  // 如果pass.td中没有设置，则返回输入ir的top-level op
   auto targetOp = getOperation();
   MLIRContext *ctx = targetOp->getContext();
   ...

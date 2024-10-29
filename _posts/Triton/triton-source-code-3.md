@@ -82,3 +82,68 @@ lib/Analysis/AxisInfo.cpp
 可以通过 `test-print-alignment` pass 来打印 `AnisInfo`，详见 [TestAxisInfo](https://github.com/triton-lang/triton/blob/main/test/lib/Analysis/TestAxisInfo.cpp)
 
 # Transforms
+
+```bash
+include/triton/Dialect/TritonGPU/Transforms/
+lib/Dialect/TritonGPU/Transforms/
+```
+
+按 `python/src/passes.cc` 中组织的 transforms pipeline：
+
+> 感觉 ttgir 的这些 pass 格式上没有 ttir 写得好，关于一个 pass 大致的格式可以看官方实现或者 [如何添加一个pass](https://tfruan2000.github.io/posts/mlir-code-note/#%E5%86%99%E4%B8%80%E4%B8%AA-pass)。
+
+## add_coalesce
+
+`createTritonGPUCoalesce`: 调整 layout，重排 order，使得最大 contiguity 的维度排在最前面
+
+## add_optimize_thread_locality
+
+`createTritonGPUOptimizeThreadLocality`:
+
+## add_pipeline
+
+`createTritonGPUPipeline`: 主要针对 DotOp 进行 global memory 到 shared memory 的数据拷贝，并做 Double Buffer 或者 N Buffer 的优化。
+
+## add_prefetch
+
+`createTritonGPUPrefetch`：类似 pipeline pass，也是 Double buffer 和 N Buffer 的优化，区别是做 shared memory 到 register 的数据搬运。
+
+## add_accelerate_matmul
+
+`createTritonGPUAccelerateMatmul`
+
+## add_reorder_instructions
+
+`createTritonGPUReorderInstructions`
+
+## add_f32_dot_tc
+
+`createTritonGPUF32DotTC`
+
+## add_optimize_dot_operands
+
+`createTritonGPUOptimizeDotOperands`
+
+## add_remove_layout_conversions
+
+`createTritonGPURemoveLayoutConversions`
+
+## add_reduce_data_duplication
+
+`createTritonGPUReduceDataDuplication`
+
+## add_allocate_shared_memory
+
+`createAllocateSharedMemoryPass`
+
+## add_combine_tensor_select_and_if
+
+`createTritonGPUCombineTensorSelectAndIf`: 当 `arith.select` 和 `scf.if` 的 cond 相同时，将它们结合起来。
+
+> 这算是一个 Arith 上的通用 transform，和 TritonGPU 没啥关系(没必要放在 TritonGPU/Transforms)下，可以多次调用
+
+
+
+## add_optimize_accumulator_init
+
+`createTritonGPUOptimizeAccumulatorInit`

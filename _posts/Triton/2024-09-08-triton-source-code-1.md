@@ -548,3 +548,124 @@ static constexpr StringLiteral loopUnrollFactorAttrName("tt.loop_unroll_factor")
 3.为什么不支持affine.for
 
 在 mlir 中， affine.for 也支持了 unroll pattern，但目前在 triton 中并不会下降出 affine op(没有场景)，所以当前该pass的锚点是 `scf.for`。
+
+# 如何写一个 mlir pass
+
+1.Passes.td中定义pass的基本信息（描述、作用对象）
+
+include/xxx/Transforms/Passes.td  （xxxx一般为project名字，例如iree，一般也会定义相应的namespace `mlir::iree`）
+
+```cpp
+def passNamePass : Pass<"pass-flag">, "该pass的作用对象" > { // 作用域可以为 func::FuncOp 或 mlir::ModuleOp
+ let summary = "";
+ let description = [{
+  more detail
+  For example, consider the following input:
+  ``` mlir
+  ...
+  ````
+
+  After running, we get the expected:
+
+  ``` mlir
+  ...
+  ```
+  ]};
+  let constructor = "mlir::xxxx::createPassNamePass()";
+  let options = [
+   Option<"OptionName", "option-tag", "option-input-type", /*default*/"default-option-input-value",
+       "Option description.">
+  ];
+  let dependentDialects = [
+   // 例如：
+   "func::FuncDialect";
+   "linalg::LinalgDialect",
+   "tensor::TensorDialect",
+  ];
+
+2.Passed.h 中声明pass
+
+include/xxx/Transforms/Passes.h
+
+```cpp
+std::unique_ptr<Pass> createPassNamePass();
+```
+
+3.passName.cpp中定义pass的实现
+
+lib/xxx/Transforms/PassName.cpp
+
+```cpp
+//===- passNamePass.cpp -----------------------------------------*- cpp -*-===//
+//
+// description
+//
+//===----------------------------------------------------------------------===//
+// 头文件，常见的如下
+#inlcude "xxxx/xxx/Transforms/Passes.h"
+#include "mlir/Dialect/xxx" // #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/BuiltinAttribute.h"
+#include "mlir/IR/BuiltinType.h"
+#include "mlir/IR/Operation.h"
+#include "mlir/IR/Region.h"
+#include "mlir/IR/Type.h"
+#include "mlir/Pass/Pass.h"
+#include "mlir/Support/LLVM.h"
+
+#define DEBUG_TYPE "pass-flag"
+
+using namespace mlir;
+using namespace mlir::xxxx;
+
+namespace{
+template<class OpTy>
+class XXXXPattern : public OpRewritePattern<OpTy> {
+  using OpRewritePattern<OpTy>::OpRewritePattern;
+  LogicalResult matchAndRewrite(OpTy op,
+                                PatternRewriter &rewriter) const override {
+  }
+}
+
+// 相关代码runOperation()写在匿名空间，匿名空间可以限制标识符的作用域，防止全局空间污染
+struct PassNamePass : public PassNamePassBase<PassNamePass> {
+ // explicit PassNamePass() = default(option-input-type optionName) {
+ //   this->optionName.setValue(optionName);
+ // }
+ explicit PassNamePass() = default;
+
+ void runOnOperation() override {
+  // 根据td中的作用域来返回，如果pass的td定义的作用域是mlir::ModuleOp,则这里返回moduleOp。
+  // 如果pass.td中没有设置，则返回输入ir的top-level op
+  auto targetOp = getOperation();
+  MLIRContext *ctx = targetOp->getContext();
+  ...
+  // 也可以使用pattern
+ }
+
+}
+}; // end struct
+
+} //namespace
+
+// std::unique_ptr mlir::xxxx::createPassNamePass(option-input-type optionName)
+std::unique_ptr mlir::xxxx::createPassNamePass(){
+ // return std::make_unique<PassNamePass>(optionName);
+ return std::make_unique<PassNamePass>();
+}
+```
+
+4.passName.mlir中添加对该pass的单元测试
+
+mlir/test/XXX/PassName.mlir
+
+```cpp
+// RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline='builtin.module(func.func(passname))' | FileCheck %s
+
+func.func @example() -> () {
+ ...
+  return ...
+}
+// CHECK-LABEL: @example
+// CHECK-NEXT:
+// CHECK-NEXT
+```
