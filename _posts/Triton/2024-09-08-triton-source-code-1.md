@@ -561,15 +561,9 @@ def passNamePass : Pass<"pass-flag">, "该pass的作用对象" > { // 作用域�
  let description = [{
   more detail
   For example, consider the following input:
-  ``` mlir
-  ...
-  ````
-
+    ...
   After running, we get the expected:
-
-  ``` mlir
-  ...
-  ```
+    ...
   ]};
   let constructor = "mlir::xxxx::createPassNamePass()";
   let options = [
@@ -582,6 +576,7 @@ def passNamePass : Pass<"pass-flag">, "该pass的作用对象" > { // 作用域�
    "linalg::LinalgDialect",
    "tensor::TensorDialect",
   ];
+```
 
 2.Passed.h 中声明pass
 

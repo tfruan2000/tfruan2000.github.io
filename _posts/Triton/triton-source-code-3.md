@@ -90,7 +90,9 @@ lib/Dialect/TritonGPU/Transforms/
 
 按 `python/src/passes.cc` 中组织的 transforms pipeline：
 
-> 感觉 ttgir 的这些 pass 格式上没有 ttir 写得好，关于一个 pass 大致的格式可以看官方实现或者 [如何添加一个pass](https://tfruan2000.github.io/posts/mlir-code-note/#%E5%86%99%E4%B8%80%E4%B8%AA-pass)。
+> 感觉 ttgir 的这些 pass 格式上没有 ttir 中的易读，因为在 [PR3971](https://github.com/triton-lang/triton/pull/3971/files#diff-d607223a38c42aeeb2b41abb0fa3bfd2496ffe31858d541181d0f41c36672217R11) 中使用了
+>
+> 关于一个 pass 大致的格式可以看官方实现或者 [如何添加一个pass](https://tfruan2000.github.io/posts/mlir-code-note/#%E5%86%99%E4%B8%80%E4%B8%AA-pass)。
 
 ## add_coalesce
 
@@ -138,11 +140,65 @@ lib/Dialect/TritonGPU/Transforms/
 
 ## add_combine_tensor_select_and_if
 
-`createTritonGPUCombineTensorSelectAndIf`: 当 `arith.select` 和 `scf.if` 的 cond 相同时，将它们结合起来。
+`createTritonGPUCombineTensorSelectAndIf`: 当 `arith.select` 和 `scf.if` 的 cond 相同时，将它们结合起来，大致是以下的行为。
 
-> 这算是一个 Arith 上的通用 transform，和 TritonGPU 没啥关系(没必要放在 TritonGPU/Transforms)下，可以多次调用
+```text
+%select = arith.select %cond, %trueVal, %falseVal
+%if = scf.if %cond -> (...) {
+  ...
+  scf.yield ...
+} else {
+  scf.yield ...
+}
+use %select
 
+->
 
+%select = arith.select %cond, %trueVal, %falseVal
+%if:2 = scf.if %cond -> (...) {
+  ...
+  scf.yield ..., %trueVal
+} else {
+  scf.yield ..., %falseVal
+}
+use %if#1
+```
+
+> 这算是一个 Arith 上的通用 transform，和 TritonGPU 没啥关系(感觉没必要放在 TritonGPU/Transforms)下，可以多次调用
+>
+> 当前调用点的位置也有点奇怪。
+
+### 代码逻辑
+
+(1)遍历 arith.select，找其 cond 的 user，若是 scf.if 且符合一定条件(arith.select的res的users都被scf.if dominates)收集，收集在 `MapVector<scf::IfOp, SmallVector<arith::SelectOp>>` 中。
+只需要收集第一个scf.if op就好，因为canonicalize会将相同condition的scf.if给合并。
+
+(2)然后遍历收集的 `MapVector`，为每一组都创建一个新的 scf.if，arith.select的trueVal 和 falseVal 分别作为 thenRegion 的返回值和 elseRegion 的返回值，然后替换 arith.select的res的users。
+
+### nits
+
+两点增强鲁棒性的优化：
+
+(1)user 在 scf.if 内部
+
+不能用 `dom.dominates(ifOp, user)` 判断 ifOp 对 user 的支配关系，因为当 userOp 在 ifOp 内部时也会返回 true。得改用 `dom.properlyDominates(ifOp, user, false)` 过滤掉包含的影响。
+
+由此，我们可以先对 arith.select进行标准化，减少重复判断。
+
+(2)scf.if 的 cond 和 arith.select 的 cond 有**取非**关系，可以将 arith.select 的 trueVal 和 falseVal 分别作为 elseRegion 的返回值和 thenRegion 的返回值
+
+```text
+%select = arith.select %cond, %trueVal, %falseVal
+%true = arith.constant true : i1
+%newCond = arith.xori %cond, %true : i1
+%if = scf.if %newCond -> (...) {
+  ...
+  scf.yield ...
+} else {
+  scf.yield ...
+}
+use %select
+```
 
 ## add_optimize_accumulator_init
 

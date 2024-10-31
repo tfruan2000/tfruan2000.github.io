@@ -2306,7 +2306,45 @@ mlir/lib/IR/Dominance.cpp
 
 - 如果a是Operation，则直接调用 properlyDominatesImpl
 
-- 如果a是Value，且a是BlockArgument，则`dominates(blockArg.getOwner(), b->getBlock());`，反之properlyDominates((Operation *)a.getDefiningOp(), b)
+- 如果a是Value(BlockArguement / OpResult)
+  - a是BlockArgument，则`dominates(blockArg.getOwner(), b->getBlock());`
+  - 反之 `properlyDominates((Operation *)a.getDefiningOp(), b)`
+
+- properlyDominatesImpl(Operation *a, Operation *b, bool enclosingOpOk)
+  - 当 a 和 b 位于不同区域且 a 包含 b，此时 a 并不会被视为支配 b(enclosingOpOk = false)
+  - 其实当 block 相同时，是检查 “在 block 中 a 的位置在 b 之前” (`a->isBeforeInBlock(b)`)是否成立
+
+例如下面的例子中：
+
+- properlyDominatesImpl(opA, opB, true) = true
+- properlyDominatesImpl(opA, opB, false) = false
+- properlyDominatesImpl(opA, opC, true) = true
+- properlyDominatesImpl(opA, opC, false) = true
+
+```text
+region0 {
+  ^bb0 {
+    opA
+    (opA)region1 {
+      ^bb1 {
+        opB
+      }
+    }
+    opC
+  }
+}
+```
+
+这个 dominance 方法注意和 `isProperAncestor` 区别开，前者要求判断前后次序，后者是判断是否在子region中。
+
+```cpp
+bool Operation::isProperAncestor(Operation *other) {
+  while ((other = other->getParentOp()))
+    if (this == other)
+      return true;
+  return false;
+}
+```
 
 3.bool hasSSADominance(Block *block) -> hasSSADominance(block->getParent())
 
@@ -4391,11 +4429,9 @@ def passNamePass : Pass<"pass-flag">, "该pass的作用对象" > { // 作用域�
  let description = [{
   more detail
   For example, consider the following input:
-    ``` mlir
-   ````
-    After running, we get the expected:
-    ``` mlir
-   ```
+    ...
+  After running, we get the expected:
+    ...
   ]};
   let constructor = "mlir::xxxx::createPassNamePass()";
   let options = [
@@ -4408,6 +4444,7 @@ def passNamePass : Pass<"pass-flag">, "该pass的作用对象" > { // 作用域�
    "linalg::LinalgDialect",
    "tensor::TensorDialect",
   ];
+```
 
 2.Passed.h 中声明pass
 
@@ -5448,10 +5485,12 @@ for (Range range : loopRanges) {
 
 `value` 只可能表现为 `BlockArgument` 和 `OpResult` 两种形式，所以从 `value` 找其对应 `operation` 的方法：
 
+## 常用方法
+
 - getDefiningOp： BlockArgument 返回 null
 - getOwner()
-  - OpResult ：返回拥有这个result的Operation。 `getArgNumber`
-  - BlockArgument ：返回拥有这个blockarg的Block。 `getResultNumber`
+  - 对于 OpResult ：返回拥有这个result的Operation。 `getArgNumber`
+  - 对于 BlockArgument ：返回拥有这个blockarg的Block。 `getResultNumber`
 
 ```cpp
   // Try to get a memory effect interface for the parent operation.
@@ -5467,15 +5506,21 @@ for (Range range : loopRanges) {
 ```
 
 - getUses()：返回 OpOperand 的迭代器，返回使用了这个value的OpOperand集合
-`OpOperand &operand : value.getUses()`
+  - `OpOperand &operand : value.getUses()`
 - getUsers()：返回 Operation 的迭代器 ，返回仅包括直接依赖于该value的其他operation
-user_iterator相当于对use_iterator使用getOwner()
-use.getOwner() —> Operation*
+  - user_iterator相当于对use_iterator使用getOwner()
+  - use.getOwner() —> Operation*
 
 修改value
 
 - replaceAllUseWith(Value newValue)
 - replaceAllUsesExcept(Value newValue, Operation *exceptedUser)
+
+## 相关类
+
+- TypeValue
+
+TypeValue 继承自 Value，有静态已知的 Type(使用 getType()) 获取，避免了普通 value getType() 后还要进行 case。
 
 # Visitor
 
