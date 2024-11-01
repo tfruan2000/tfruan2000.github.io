@@ -2346,6 +2346,8 @@ bool Operation::isProperAncestor(Operation *other) {
 }
 ```
 
+当寻找一个 op 是否在一个 region 内部时，可以使用 `Operation *Region::findAncestorOpInRegion`
+
 3.bool hasSSADominance(Block *block) -> hasSSADominance(block->getParent())
 
 4.bool hasSSADominance(Region *region)
@@ -3838,7 +3840,7 @@ OpOperand &getTagMemRefMutable() { return getOperation()->getOpOperand(0); }
 // 例如使用 to 替换 from 在 userBlock中的使用
 Value from, to;
 Block *userBlock;
-rewrite.replaceUsesWithIf(from, to, [&](Operation &use) {
+rewrite.replaceUsesWithIf(from, to, [&](OpOperand &use) {
   return userBlock == use.getOwner()->getBlock();
 });
 ```
@@ -4752,7 +4754,41 @@ region包含若干个block，一般linalgOp都包含一个region
 - getUsedValuesDefinedAbove(MutableArrayRef<Region> regions, SetVector<Value> &values) 收集在regions中使用，但不在region中的blockArg上定义的Value，将其放入values
 
 - takeBody: 把另外一个region的block占为己有(相当于把另外一个region的block的所有权给拿走了)
+
 `newforallOp.getRegion().takeBody(forallOp.getRegion());`
+
+- findAncestorOpInRegion: 判断某个 op 是否在region 中
+
+```cpp
+// 返回region包含的最上层op
+Operation *Region::findAncestorOpInRegion(Operation &op) {
+  Operation *curOp = &op;
+  while (Region *opRegion = curOp->getParentRegion()) {
+    if (opRegion == this)
+      return curOp;
+
+    curOp = opRegion->getParentOp();
+    if (!curOp)
+      return nullptr;
+  }
+  return nullptr;
+}
+```
+
+判断 userOp 在 ifOp 的哪个 region。
+
+```cpp
+if (ifOp->isProperAncestor(resUser)) {
+  if (ifOp.getThenRegion().findAncestorOpInRegion(*resUser) !=
+      nullptr) {
+    // The user is inside the ThenRegion of the scf.if.
+    ...
+  } else {
+    // The user is inside the ElseRegion of the scf.if.
+    ...
+  }
+}
+```
 
 - getOps() : 获得region内的所有op，有相对次序
 

@@ -183,9 +183,9 @@ use %if#1
 
 不能用 `dom.dominates(ifOp, user)` 判断 ifOp 对 user 的支配关系，因为当 userOp 在 ifOp 内部时也会返回 true。得改用 `dom.properlyDominates(ifOp, user, false)` 过滤掉包含的影响。
 
-由此，我们可以先对 arith.select进行标准化，减少重复判断。
+由此，我们可以先对 arith.select进行标准化，替换掉特定的user。减少重复判断。
 
-(2)scf.if 的 cond 和 arith.select 的 cond 有**取非**关系，可以将 arith.select 的 trueVal 和 falseVal 分别作为 elseRegion 的返回值和 thenRegion 的返回值
+(2)scf.if 的 cond 和 arith.select 的 cond 有**取反**关系，可以将 arith.select 的 trueVal 和 falseVal 分别作为 elseRegion 的返回值和 thenRegion 的返回值
 
 ```text
 %select = arith.select %cond, %trueVal, %falseVal
