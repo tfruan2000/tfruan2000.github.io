@@ -170,22 +170,18 @@ use %if#1
 
 ### 代码逻辑
 
-(1)遍历 arith.select，找其 cond 的 user，若是 scf.if 且符合一定条件(arith.select的res的users都被scf.if dominates)收集，收集在 `MapVector<scf::IfOp, SmallVector<arith::SelectOp>>` 中。
-只需要收集第一个scf.if op就好，因为canonicalize会将相同condition的scf.if给合并。
+(1)先标准化在 user of select in scf.if，因为后续用 `dom.dominates(ifOp, user)` 判断 ifOp 对 user 的支配关系时，当 userOp 在 ifOp 内部时也会返回 true。
+因此先对 arith.select 进行标准化，替换掉特定的 user。减少重复判断。
 
-(2)然后遍历收集的 `MapVector`，为每一组都创建一个新的 scf.if，arith.select的trueVal 和 falseVal 分别作为 thenRegion 的返回值和 elseRegion 的返回值，然后替换 arith.select的res的users。
+> 也可以改用 `dom.properlyDominates(ifOp, user, false)` 过滤掉包含的影响。
+
+(2)遍历 arith.select，找其 cond 的 user，若是 scf.if 且符合一定条件(arith.select的res的users都被scf.if dominates)收集，收集在 `MapVector<scf::IfOp, SmallVector<arith::SelectOp>>` 中。
+
+(3)然后遍历收集的 `MapVector`，为每一组都创建一个新的 scf.if，arith.select的trueVal 和 falseVal 分别作为 thenRegion 的返回值和 elseRegion 的返回值，然后替换 arith.select的res的users。
 
 ### nits
 
-两点增强鲁棒性的优化：
-
-(1)user 在 scf.if 内部
-
-不能用 `dom.dominates(ifOp, user)` 判断 ifOp 对 user 的支配关系，因为当 userOp 在 ifOp 内部时也会返回 true。得改用 `dom.properlyDominates(ifOp, user, false)` 过滤掉包含的影响。
-
-由此，我们可以先对 arith.select进行标准化，替换掉特定的user。减少重复判断。
-
-(2)scf.if 的 cond 和 arith.select 的 cond 有**取反**关系，可以将 arith.select 的 trueVal 和 falseVal 分别作为 elseRegion 的返回值和 thenRegion 的返回值
+增强鲁棒性的优化：scf.if 的 cond 和 arith.select 的 cond 有**取反**关系，可以将 arith.select 的 trueVal 和 falseVal 分别作为 elseRegion 的返回值和 thenRegion 的返回值
 
 ```text
 %select = arith.select %cond, %trueVal, %falseVal

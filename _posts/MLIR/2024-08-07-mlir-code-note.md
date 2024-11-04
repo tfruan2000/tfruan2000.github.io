@@ -296,6 +296,8 @@ enum class [[nodiscard]] ChangeResult {
 };
 ```
 
+lattice 有 `join(const ValueT &rhs)` 方法，会合并rhs包含的信息，返回当前lattice是否更改
+
 > `[[nodiscard]]` 来标记函数的返回值不应该被忽略。也就是说，当调用一个被标记为 `[[nodiscard]]` 的函数时，
 > 如果返回值没有被使用，编译器会发出警告。
 {: .prompt-info }
@@ -398,7 +400,11 @@ LogicalResult DataFlowSolver::initializeAndRun(Operation *top) {
 const auto analysisState = solver->lookupState<xxxxx>(op)
 ```
 
-analysisStates 的类型是 `DenseMap<std::pair<ProgramPoint, TypeID>, std::unique_ptr<AnalysisState>>`，表示每个 `std::pair<ProgramPoint, TypeID>`对应一个分析状态(AnalysisState)
+(4) 其他：重要的数据成员
+
+- `using WorkItem = std::pair<ProgramPoint, DataFlowAnalysis *>`, std::queue<WorkItem> worklist solver的工作队列
+- SmallVector<std::unique_ptr<DataFlowAnalysis>> childAnalyses
+- DenseMap<std::pair<ProgramPoint, TypeID>, std::unique_ptr<AnalysisState>> analysisStates，表示每个 `std::pair<ProgramPoint, TypeID>`对应一个分析状态(AnalysisState)
 
 ## Liveness
 
@@ -5435,6 +5441,8 @@ Value 必然包含 Type，Type 也可以作为 Attribute 附加在 Operation 上
 
 - getLayout() -> MemRefLayoutAttrInterface
   - isIdentity() : result type has no offset.
+    - 当MemRefType不带layout的时候返回true
+    - 判断之前先将 `MemRefType` 规范化一下 `canonicalizeStridedLayout`
 
 - 获得dim
 
