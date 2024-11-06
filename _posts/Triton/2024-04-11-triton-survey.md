@@ -1106,4 +1106,7 @@ def triton_poi_fused_add_0(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.const
 
 过程细节可以看：[triton_heuristics.py](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/runtime/triton_heuristics.py)
 
-注册手写的 triton kernel：可以参考 flaggems 在 Aten 层面直接对算子进行覆盖重写，但这样就不是走 Inductor 了。还没了解如何注册到 Inductor。
+注册手写的 triton kernel：可以参考 flaggems 在 Aten 层面直接对算子进行覆盖重写，但这样就不是走 Inductor 了。
+注册 Inductor 最简单的方式 `compile` 接口的 backend 直接指定一个 triton-lang 写好的 kernel。
+
+> dynamo到triton的桥梁，dynamo：通过eager模式生成一个图，inductor是把dynamo生成的graph变成kernel组合

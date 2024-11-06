@@ -79,7 +79,41 @@ lib/Analysis/AxisInfo.cpp
 
 3.打印方法
 
-可以通过 `test-print-alignment` pass 来打印 `AnisInfo`，详见 [TestAxisInfo](https://github.com/triton-lang/triton/blob/main/test/lib/Analysis/TestAxisInfo.cpp)
+可以通过 `test-print-alignment` pass 来打印 `AnisInfo`，详见 [TestAxisInfo](https://github.com/triton-lang/triton/blob/main/test/lib/Analysis/TestAxisInfo.cpp) 以及 test/Analysis/test-alignment.mlir。
+
+4.ModuleAxisInfoAnalysis
+
+为 module 内每个 `FunctionOpInterface` 为单元收集 `DenseMap<Value, AxisInfo>`，这里假设了所有 func 之间都是独立的，没有 `func.call` 这种互相调用的行为(提前 inline 也行)。
+
+每个 func 维护一个信息 `DenseMap<Value, AxisInfo>`，其中 Value 包含 func 内所有 `OpResult` 以及 `BlockArguement`。如下：
+
+```cpp
+  auto updateAxisInfoMap = [&](Value value) {
+    auto axisInfo = analysis->getLatticeElement(value)->getValue();
+    AxisInfo curAxisInfo;
+    if (axisInfoMap->count(value)) {
+      curAxisInfo = AxisInfo::join(axisInfo, axisInfoMap->lookup(value));
+    } else {
+      curAxisInfo = axisInfo;
+    }
+    (*axisInfoMap)[value] = curAxisInfo;
+  };
+```
+
+当重复访问到已存在 Value 时会进行 Lattice 的交汇join，一般Lattice的join方法返回的是表示是否发生改变的状态信息 `ChangeResult`，但 AxisInfo 中重写了相关的 join 方法：
+
+- lhs/rhs的rank为0时，意味着其中一个AxisInfo对象没有初始化或为空，直接返回另一个对象
+- 循环遍历每个维度d，计算contiguity、divisibility和constancy的最小公倍数(gcd)
+
+  ```cpp
+  contiguity.push_back(gcd(lhs.getContiguity(d), rhs.getContiguity(d)));
+  divisibility.push_back(gcd(lhs.getDivisibility(d), rhs.getDivisibility(d)));
+  constancy.push_back(gcd(lhs.getConstancy(d), rhs.getConstancy(d)));
+  ```
+
+- 对于 `constantValue`，当且仅当 lhs 和 rhs 的 constantValue 都存在且相等时才保留，反之都为 `std::nullopt_t`。
+
+> 更多mlir数据流相关的内容请见[dataflow-analysis](https://tfruan2000.github.io/posts/mlir-code-note/#dataflow-analysis)。
 
 # Transforms
 
@@ -96,7 +130,38 @@ lib/Dialect/TritonGPU/Transforms/
 
 ## add_coalesce
 
-`createTritonGPUCoalesce`: 调整 layout，重排 order，使得最大 contiguity 的维度排在最前面
+`createTritonGPUCoalesce`: 调整访存相关 op 的 ptr layout
+
+### 代码逻辑
+
+1.收集输入module的 `ModuleAxisInfoAnalysis`(以 func 为单位，收集func内每个value的信息)
+
+2.遍历每个 module 内每个 memory access op，只有当其 ptr value 的 Type 是 RankedTensorType 并且 elemType 是 PointerType 时(例如tensor<256x!tt.ptr<f32>>)才继续处理。
+
+3.为每个符合上述条件的op setCoalescedEncoding：
+
+- `getShapePerCTA(ptr.getType())` 获得的一般就是 ptr type 的 shape，因为 default layout 中的默认 CTAsPerCGA = CTASplitNum = [1...1]，表示每个CTA是独立的。
+- 使用 `multiRootGetSlice` 收集当前 op 所有相关的 op，返回这些 op 的拓扑排序。这个函数还挺有意思，使用 `getBackwardSlice` 和 `forwardSlice` 分别收集相关的 producer op 和 consumer op。直到worklist不再增长。
+- 遍历上述收集到的 `SetVector`，将 shape 相同且 order 相同的 memory access op 加入 memAccessesSameOrder 中。
+- 遍历 `memAccessesSameOrder` 中的 op，获得每个 op 的 `getNumElementsPerThread` 函数输出(表示可以选择的最大perThread)，一直维护一个最大值；最大的 `perThread` 再取和 `numElems / numThreads` 比较的较小值。
+- 对于能对global memory写的memory access op，perThread 为了性能考量需要尽量至少128bits对齐，所以有 `min(alignment, 128 / elemNumBits)` 的逻辑。
+- 采用得到的新 `perThread` 作为 `sizePerThread[order[0]]` 构建新的 BlockLayout。
+
+```text
+$ triton-opt -tritongpu-coalesce tmp.mlir --debug-only=tritongpu-coalesce
+[tritongpu-coalesce]: Considering op: %9 = tt.load %8, %6 : tensor<1024x!tt.ptr<f32>, #triton_gpu.blocked<{sizePerThread = [1], threadsPerWarp = [32], warpsPerCTA = [4], order = [0]}>>
+[tritongpu-coalesce]: axis info of pointer: contiguity = [1024], divisibility = [16], constancy = [1], constant_value = <none>
+[tritongpu-coalesce]: order=[0]
+[tritongpu-coalesce]: shapePerCTA=[1024]
+[tritongpu-coalesce]: perThread for op: 4
+[tritongpu-coalesce]: perThread: 4
+
+#blocked 是 loadOp coalesce 前的 layout， #blocked 是 loadOp coalesce 后的 layout。
+#blocked = #triton_gpu.blocked<{sizePerThread = [1], threadsPerWarp = [32], warpsPerCTA = [4], order = [0]}>
+#blocked1 = #triton_gpu.blocked<{sizePerThread = [4], threadsPerWarp = [32], warpsPerCTA = [4], order = [0]}>
+```
+
+4.
 
 ## add_optimize_thread_locality
 

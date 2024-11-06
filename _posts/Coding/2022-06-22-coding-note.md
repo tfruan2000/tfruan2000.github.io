@@ -71,46 +71,6 @@ int lengthOfLongestSubstring(string s) {
 }
 ```
 
-2.LCR 183. 望远镜中最高的海拔
-
-heights[i] 表示对应位置的海拔高度，返回[k, k + limit] 窗口内的 heights[i] 的最大值
-
-```cpp
-vector<int> maxAltitude(vector<int>& heights, int limit) {
-    int n = heights.size();
-    if (limit == 0 || n == 0)
-        return {};
-    if (n == 1)
-        return heights;
-
-    deque<int> q;
-    vector<int> res;
-    res.reserve(n - limit + 1);
-    for (int i = 0; i < limit; ++i) {
-        // 使用 while 一个个出队
-        while (!q.empty() && heights[i] > q.back()) {
-            // 如果 q.back() 大于当前值就不pop
-            // 如果q中只有一个值，说明最大值一直在变
-            q.pop_back();
-        }
-        q.push_back(heights[i]);
-    }
-    res.push_back(q.front());
-    for (int i = limit; i < n; ++i) {
-        while (!q.empty() && heights[i] > q.back()) {
-            q.pop_back();
-        }
-        q.push_back(heights[i]);
-        if (heights[i - limit] == q.front()) {
-            // 当前记录的最大值应该被窗口排出
-            q.pop_front();
-        }
-        res.push_back(q.front());
-    }
-    return res;
-}
-```
-
 3.最小覆盖子串
 
 ```cpp
@@ -151,6 +111,46 @@ string minWindow(string s, string t) {
   }
   if (s.size() + 1 == len) return {};
   return s.substr(record, len);
+}
+```
+
+3.LCR 183. 望远镜中最高的海拔
+
+heights[i] 表示对应位置的海拔高度，返回[k, k + limit] 窗口内的 heights[i] 的最大值
+
+```cpp
+vector<int> maxAltitude(vector<int>& heights, int limit) {
+    int n = heights.size();
+    if (limit == 0 || n == 0)
+        return {};
+    if (n == 1)
+        return heights;
+
+    deque<int> q;
+    vector<int> res;
+    res.reserve(n - limit + 1);
+    for (int i = 0; i < limit; ++i) {
+        // 使用 while 一个个出队
+        while (!q.empty() && heights[i] > q.back()) {
+            // 如果 q.back() 大于当前值就不pop
+            // 如果q中只有一个值，说明最大值一直在变
+            q.pop_back();
+        }
+        q.push_back(heights[i]);
+    }
+    res.push_back(q.front());
+    for (int i = limit; i < n; ++i) {
+        while (!q.empty() && heights[i] > q.back()) {
+            q.pop_back();
+        }
+        q.push_back(heights[i]);
+        if (heights[i - limit] == q.front()) {
+            // 当前记录的最大值应该被窗口排出
+            q.pop_front();
+        }
+        res.push_back(q.front());
+    }
+    return res;
 }
 ```
 
