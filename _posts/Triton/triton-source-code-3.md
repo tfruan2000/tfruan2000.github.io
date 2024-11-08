@@ -130,7 +130,7 @@ lib/Dialect/TritonGPU/Transforms/
 
 ## add_coalesce
 
-`createTritonGPUCoalesce`: 调整访存相关 op 的 ptr layout
+`createTritonGPUCoalesce`: 调整访存相关 op 的 ptr layout，会重排 order，使得最大 contiguity 的维度排在最前面
 
 ### 代码逻辑
 
@@ -138,14 +138,21 @@ lib/Dialect/TritonGPU/Transforms/
 
 2.遍历每个 module 内每个 memory access op，只有当其 ptr value 的 Type 是 RankedTensorType 并且 elemType 是 PointerType 时(例如tensor<256x!tt.ptr<f32>>)才继续处理。
 
-3.为每个符合上述条件的op setCoalescedEncoding：
+3.为每个符合上述条件的**op** setCoalescedEncoding：
 
-- `getShapePerCTA(ptr.getType())` 获得的一般就是 ptr type 的 shape，因为 default layout 中的默认 CTAsPerCGA = CTASplitNum = [1...1]，表示每个CTA是独立的。
-- 使用 `multiRootGetSlice` 收集当前 op 所有相关的 op，返回这些 op 的拓扑排序。这个函数还挺有意思，使用 `getBackwardSlice` 和 `forwardSlice` 分别收集相关的 producer op 和 consumer op。直到worklist不再增长。
-- 遍历上述收集到的 `SetVector`，将 shape 相同且 order 相同的 memory access op 加入 memAccessesSameOrder 中。
-- 遍历 `memAccessesSameOrder` 中的 op，获得每个 op 的 `getNumElementsPerThread` 函数输出(表示可以选择的最大perThread)，一直维护一个最大值；最大的 `perThread` 再取和 `numElems / numThreads` 比较的较小值。
-- 对于能对global memory写的memory access op，perThread 为了性能考量需要尽量至少128bits对齐，所以有 `min(alignment, 128 / elemNumBits)` 的逻辑。
-- 采用得到的新 `perThread` 作为 `sizePerThread[order[0]]` 构建新的 BlockLayout。
+(0)`getShapePerCTA(ptr.getType())` 获得的一般就是 ptr type 的 shape，因为 default layout 中的默认 CTAsPerCGA = CTASplitNum = [1...1]，表示每个CTA是独立的。
+
+(1)`argSort(contiguity)` 根据 ptr value 的 `contiguity` 属性获得新的 `order`，新 order 是 `contiguity` 的相对大小次序。
+
+(2)使用 `multiRootGetSlice` 收集当前 op 所有相关的 op，返回这些 op 的拓扑排序。这个函数还挺有意思，使用 `getBackwardSlice` 和 `forwardSlice` 分别收集相关的 producer op 和 consumer op。直到worklist不再增长。
+
+(3)遍历上述收集到的 `SetVector`，将 shape 相同且 order 相同的 memory access op 加入 memAccessesSameOrder 中。
+
+(4)遍历 `memAccessesSameOrder` 中的 op，获得每个 op 的 `getNumElementsPerThread` 函数输出(表示可以选择的最大perThread)，一直维护一个最大值；最大的 `perThread` 再取和 `numElems / numThreads` 比较的较小值。
+
+(5)对于能对global memory写的memory access op，单 thread 一次处理的数据量为 `perThread * elemBits`，为了性能考量，这个值最大只能等于128bits，所以有 `min(alignment, 128 / elemNumBits)` 的逻辑。
+
+(6)采用得到的新 `perThread` 作为 `sizePerThread[order[0]]` 构建新的 BlockLayout。并存在 `MapVector<Operation *, Attribute> layoutMap` 中。
 
 ```text
 $ triton-opt -tritongpu-coalesce tmp.mlir --debug-only=tritongpu-coalesce
@@ -161,11 +168,32 @@ $ triton-opt -tritongpu-coalesce tmp.mlir --debug-only=tritongpu-coalesce
 #blocked1 = #triton_gpu.blocked<{sizePerThread = [4], threadsPerWarp = [32], warpsPerCTA = [4], order = [0]}>
 ```
 
-4.
+4.使用上一步中为 memory access op 获得的 BlockLayout Attribute 调用 `coalesceOp` 方法，为 op 设置该 Attribute(重新创建一个)。
+
+遍历 operand，获得新 op 的 operand 以及 resultType，同时插入 `triton_gpu.convert_layout` 来保证转换到新 layout 的语义合法性。
+
+```text
+#blocked = #triton_gpu.blocked<{sizePerThread = [1], threadsPerWarp = [32], warpsPerCTA = [4], order = [0]}>
+%9 = tt.load %8, %6 : tensor<1024x!tt.ptr<f32>, #blocked>
+
+->
+
+#blocked1 = #triton_gpu.blocked<{sizePerThread = [4], threadsPerWarp = [32], warpsPerCTA = [4], order = [0]}>
+%9 = triton_gpu.convert_layout %8 : tensor<1024x!tt.ptr<f32>, #blocked> -> tensor<1024x!tt.ptr<f32>, #blocked1>
+%10 = triton_gpu.convert_layout %6 : tensor<1024xi1, #blocked> -> tensor<1024xi1, #blocked1>
+%11 = tt.load %9, %10 : tensor<1024x!tt.ptr<f32>, #blocked1>
+%12 = triton_gpu.convert_layout %11 : tensor<1024xf32, #blocked1> -> tensor<1024xf32, #blocked>
+```
 
 ## add_optimize_thread_locality
 
-`createTritonGPUOptimizeThreadLocality`:
+`createTritonGPUOptimizeThreadLocality`: 优化 `tt.reduce` 操作，尽可能减少 cross thread communication。
+
+### 代码逻辑
+
+1.首先贪心地应用 `OptimizeReshapeLayoutPattern`，rewrite 全部符合条件的 `tt.reshape` 操作。
+
+-
 
 ## add_pipeline
 
