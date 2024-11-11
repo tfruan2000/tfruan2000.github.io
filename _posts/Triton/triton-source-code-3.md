@@ -191,9 +191,68 @@ $ triton-opt -tritongpu-coalesce tmp.mlir --debug-only=tritongpu-coalesce
 
 ### 代码逻辑
 
-1.首先贪心地应用 `OptimizeReshapeLayoutPattern`，rewrite 全部符合条件的 `tt.reshape` 操作。
+这段代码的主要逻辑是对 tt.reduce 的修改以及一个 `OptimizeReshapeLayoutPattern`。
 
--
+1.这里先看对 tt.reduce 的处理：
+
+(1) 收集符合条件的 tt.reduce
+
+- reduce 的 region 内只有两个 op，一个是 payloadOp 一个是 yield，要求这个 payloadOp 是 addf, mulf, maxf, minf, maxnumf, minnumf
+- srcType 的 layout 是 BlockLayout，且 rank > 1，且 reduction dim 是最内维，且 sizePerThread[rank - 1] != 1
+- 所有 input operand 都来自于 tt.load
+- reduce 只有一个 user(userA)，且这个 userA 也只有有个 user(userB)，这个 userB 是 scf.for 的 scf.yield
+- 上述 userB 会对应 scf.yield 中的一个 operand，根据这个 operand 的 idx 可以获得 scf.for 对应的 iterArg， 该 iterArg 来自于一个 arith.constant
+
+例如下面ir 中的 tt.reduce 即符合条件
+
+```text
+#blocked = #triton_gpu.blocked<{sizePerThread = [1, 2], threadsPerWarp = [1, 32], warpsPerCTA = [4, 1], order = [1, 0]}>
+%19 = scf.for %arg3 = %1 to %11 step %2 iter_args(%arg4 = %cst) -> (tensor<32xf32, #triton_gpu.slice<{dim = 1, parent = #blocked}>>)  : i32 {
+  ...
+  %33 = tt.load %32 : tensor<32x128x!tt.ptr<f32>, #blocked> // input 来自 tt.load，且 sizePerThread[rank - 1] != 1
+  %34 = "tt.reduce"(%33) <{axis = 1 : i32}> ({ // reduce axis = rank - 1
+  ^bb0(%arg5: f32, %arg6: f32):
+    %36 = arith.addf %arg5, %arg6 : f32 // payload 唯一且为 addf
+    tt.reduce.return %36 : f32
+  }) : (tensor<32x128xf32, #blocked>) -> tensor<32xf32, #triton_gpu.slice<{dim = 1, parent = #blocked}>>
+  %35 = arith.addf %arg4, %34 : tensor<32xf32, #triton_gpu.slice<{dim = 1, parent = #blocked}>> // 唯一 userA
+  scf.yield %35 : tensor<32xf32, #triton_gpu.slice<{dim = 1, parent = #blocked}>> // 唯一 useB，且为 scf.yeild
+}
+```
+
+(2)rewrite 每个 tt.reduce
+
+balabala
+
+2.然后回过头，看 `OptimizeReshapeLayoutPattern`，这个 RewritePattern 在 `runOnOperation()` 一进来就贪心地应用了，对全部符合条件的 `tt.reshape` 操作进行 rewrite。
+
+> `tt.reshape` 的 `allow_reorder` 和 `efficient_layout` 属性现在都被改成了 `UnitAttr`(见[PR](https://github.com/triton-lang/triton/pull/4947))，默认情况下为 `None`。
+
+(1) 该 rewrite pattern 进入要求(对 tt.reshape 的要求)：
+
+- 有 `allow_reorder` 属性
+- resUsers 中存在 tt.reduce，且不同的 tt.reduce 的 reduction axis 轴要相同，记录为 reductionAxis
+- resType 的 BlockLayout 中 reductionAxis 维度，不满足 `sizePerThread = 1 && threadsPerWarp = 1 && warpsPerCTA = 1`
+
+(2) 创建新的 `order`，将 reducionAxis 放在 `order` 的最后，然后根据新的 order 信息使用 `getDefaultBlockedEncoding` 方法创建新的 BlockLayout，在 [ttir-2-ttgir](https://tfruan2000.github.io/posts/triton-source-code-2/#ttir-2-ttgir) 中有该函数的讲解
+
+(3) 将新的 layout 作为 tt.reshape 的新 resType，插入triton_gpu.convert_layout将 resType转回去好作为 tt.reduce 的 inp
+
+```text
+#blocked = #triton_gpu.blocked<{sizePerThread = [1, 16], threadsPerWarp = [4, 8], warpsPerCTA = [2, 1], order = [1, 0]}>
+#blocked1 = #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [2, 16], warpsPerCTA = [1, 2], order = [1, 0]}>
+%0 = tt.reshape %arg0 allow_reorder : tensor<8x128xf32, #blocked> -> tensor<64x16xf32, #blocked1>
+%1 = "tt.reduce"(%0) <{axis = 1 : i32}>
+
+->
+
+#blocked2 = #triton_gpu.blocked<{sizePerThread = [1, 1], threadsPerWarp = [32, 1], warpsPerCTA = [2, 1], order = [0, 1]}>
+%0 = tt.reshape %arg0 allow_reorder efficient_layout : tensor<8x128xf32, #blocked> -> tensor<64x16xf32, #blocked2>
+%1 = triton_gpu.convert_layout %0 : tensor<64x16xf32, #blocked2> -> tensor<64x16xf32, #blocked1>
+%2 = "tt.reduce"(%1) <{axis = 1 : i32}> ({
+```
+
+> tt.reshape 是一种 viewOp，下降的pattern在 `ViewOpToLLVM.cpp` 文件，不作实际计算，相当于重新解释index的语法糖，但这里插了convert_layout给转回去了，那这根据reduction axis 来改tt.reshape的layout的意义在哪呢？
 
 ## add_pipeline
 
@@ -230,6 +289,10 @@ $ triton-opt -tritongpu-coalesce tmp.mlir --debug-only=tritongpu-coalesce
 ## add_allocate_shared_memory
 
 `createAllocateSharedMemoryPass`
+
+## add_allocate_global_scratch_memory
+
+`createTritonGPUGlobalScratchAllocationPass`
 
 ## add_combine_tensor_select_and_if
 
@@ -292,3 +355,7 @@ use %select
 ## add_optimize_accumulator_init
 
 `createTritonGPUOptimizeAccumulatorInit`
+
+## add_loop_scheduling
+
+`createTritonGPULoopScheduling`

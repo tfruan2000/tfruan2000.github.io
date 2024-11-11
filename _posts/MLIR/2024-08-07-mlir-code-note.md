@@ -3803,7 +3803,7 @@ mlir/include/mlir/IR/Value.h
 ```cpp
 OpOperand a;
 Value b = a->get();
-unsigned idx = a.getOperandNumber(); // 返回operation中改operand的idx，一般想要获得operand的idx也是通过其OpOperand
+unsigned idx = a.getOperandNumber(); // 返回operation中该operand的idx，一般想要获得operand的idx也是通过其OpOperand
 Value value;
 a.assign(value);
 ```
