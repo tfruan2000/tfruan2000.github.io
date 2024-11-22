@@ -396,8 +396,10 @@ LogicalResult DataFlowSolver::initializeAndRun(Operation *top) {
 (3) 从 solver 中 query analysis state results
 
 ```cpp
-// lookupState 可能返回 null
-const auto analysisState = solver->lookupState<xxxxx>(op)
+// 当不存在时, lookupState 会返回 null
+auto analysisState = solver->lookupState<xxLattice>(Value/Op)
+// 当不存在时, getOrCreateState 会创建一个未初始化的 state
+auto analysisState = solver->getOrCreateState<xxLattice>(Value/Op)
 ```
 
 (4) 其他：重要的数据成员
@@ -1883,6 +1885,19 @@ mlir/include/mlir/Dialect/Linalg/IR/LinalgInterfaces.td
 - getIndexingMapsArray
 
 返回region内的计算。generic op内部是由一堆的计算组成的，即可以看成一个`AffineMap`。
+
+- getRegionOutputArgs
+
+返回region内的outArg，配合 SliceAnalysis 的 `matchReduction` 可以收集 reductions op
+
+```cpp
+  SmallVector<Operation *, 4> combinerOps;
+  if (!matchReduction(op.getRegionOutputArgs(), 0, combinerOps))
+    return failure();
+  Operation *payloadOp = combinerOps[0];
+```
+
+例如 linalg.reduce {addf} 将会返回 arith.addf
 
 - payloadUsesValueFromOperand
 
