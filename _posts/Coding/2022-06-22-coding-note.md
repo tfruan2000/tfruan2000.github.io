@@ -90,7 +90,7 @@ string minWindow(string s, string t) {
   for (int i = 0; i < t.size(); ++i) {
     ++maps[s[i]];
   }
-  int l = 0, right = t.size() - 1;
+  int l = 0, r = t.size() - 1;
   int len = s.size() + 1, start = 0;
   while (r < s.size()) {
     // 右移直到覆盖

@@ -130,7 +130,7 @@ lib/Dialect/TritonGPU/Transforms/
 
 ## add_coalesce
 
-`createTritonGPUCoalesce`: 调整访存相关 op 的 ptr layout，会重排 order，使得最大 contiguity 的维度排在最前面
+`CoalescePass`: 调整访存相关 op 的 ptr layout，会重排 order，使得最大 contiguity 的维度排在最前面，并且修改 perThread
 
 ### 代码逻辑
 
@@ -187,7 +187,9 @@ $ triton-opt -tritongpu-coalesce tmp.mlir --debug-only=tritongpu-coalesce
 
 ## add_optimize_thread_locality
 
-`createTritonGPUOptimizeThreadLocality`: 优化 `tt.reduce` 操作，尽可能减少 cross thread communication。
+`OptimizeThreadLocalityPass`: 优化 `tt.reduce` 操作，将 for 循环内的 reduction dim 分出一部分作为 parallel 参与计算，在 for 循环结束后再插入一个 reduce 完成最终的计算
+
+例如 for(reduce(32x128 -> 32)) 的计算，变成 for(reduce(32x32x4 -> 32x32)) + reduce(32x32 -> 32)
 
 ### 代码逻辑
 
@@ -198,15 +200,17 @@ $ triton-opt -tritongpu-coalesce tmp.mlir --debug-only=tritongpu-coalesce
 (1) 收集符合条件的 tt.reduce
 
 - reduce 的 region 内只有两个 op，一个是 payloadOp 一个是 yield，要求这个 payloadOp 是 addf, mulf, maxf, minf, maxnumf, minnumf
-- srcType 的 layout 是 BlockLayout，且 rank > 1，且 reduction dim 是最内维，且 sizePerThread[rank - 1] != 1
+- srcType 的 layout 是 BlockLayout，且 rank > 1，且 reduction dim 是最内维(即rank - 1)，且 sizePerThread[rank - 1] != 1
 - 所有 input operand 都来自于 tt.load
-- reduce 只有一个 user(userA)，且这个 userA 也只有有个 user(userB)，这个 userB 是 scf.for 的 scf.yield
-- 上述 userB 会对应 scf.yield 中的一个 operand，根据这个 operand 的 idx 可以获得 scf.for 对应的 iterArg， 该 iterArg 来自于一个 arith.constant
+- reduce 只有一个 user(userA)，且这个 userA 也只有一个 user(userB)，在后续 rewrite 的代码中有一个 `assert` 表示 userA 的 operandNum 必须为 2，且另外一个 operand 是 blockarg
+- 上述 userA 也只有一个 user(userB) 且这个 userB 是 scf.for 的 scf.yield，
+- 上述 userB 会对应 scf.yield 中的一个 operand，根据这个 operand 的 idx 可以获得 scf.for 对应的 iterArg， 该 iterArg 来自(init)于一个 arith.constant
 
 例如下面ir 中的 tt.reduce 即符合条件
 
 ```text
 #blocked = #triton_gpu.blocked<{sizePerThread = [1, 2], threadsPerWarp = [1, 32], warpsPerCTA = [4, 1], order = [1, 0]}>
+%cst = arith.constant dense<-0.000000e+00> : tensor<32xf32, #triton_gpu.slice<{dim = 1, parent = #blocked}>>
 %19 = scf.for %arg3 = %1 to %11 step %2 iter_args(%arg4 = %cst) -> (tensor<32xf32, #triton_gpu.slice<{dim = 1, parent = #blocked}>>)  : i32 {
   ...
   %33 = tt.load %32 : tensor<32x128x!tt.ptr<f32>, #blocked> // input 来自 tt.load，且 sizePerThread[rank - 1] != 1
@@ -220,9 +224,58 @@ $ triton-opt -tritongpu-coalesce tmp.mlir --debug-only=tritongpu-coalesce
 }
 ```
 
-(2)rewrite 每个 tt.reduce
+(2) rewrite 每个 tt.reduce(这一步的reduce都满足 `reduce.getAxis() == rank - 1`)
 
-balabala
+- getThreadLocalityOptimizedEncoding 获得新的 layout attr(即blocked3d)
+  - sizePerThread 在 rank - 1 处插 1, sizePerThread = [1, 2] -> sizePerThread = [1, 1, 2]
+  - threadsPerWarp 在 rank 处插 1, threadsPerWarp = [1, 32] -> threadsPerWarp = [1, 32, 1]
+  - warpsPerCTA 在 rank 处插 1, warpsPerCTA = [4, 1] -> warpsPerCTA = [4, 1, 1]
+  - order 在 0 处插 rank, order = [1, 0] -> order = [2, 1, 0]
+
+- getThreadLocalityOptimizedShape 获得 newShape
+  - shape[rank - 1] /= elemsPerThread[rank - 1]
+  - shape[rank] = elemsPerThread[rank - 1]
+  - <32x128xf32> -> <32x32x4xf32>
+
+- createAccum 去创建一个新的 arith.constant，以(1)中的ir为例，一路找到 %arg4 对应的 init(%cst)，使用上述获得的新 layout attr 和 shape 创建新的 cst
+  - sliceLayout: (dim = rank, parent = blocked3d)
+  - %cst = arith.constant dense<0.000000e+00> : tensor<32x32xf32, #triton_gpu.slice<{dim = 2, parent = #blocked2}>>
+
+- replaceForOpWithNewSignature 创建新的 scf.for
+  - 将上一步生成的新 constantOp 加入 operand（加在最后），来生成新的 scf.for
+
+- createReduce 创建新的 reduce op
+  - 首先回会为 reduce 的 operand 都创建一个 tt.reshape，将 oriType 给 reshape 成 newShape
+  - 使用这些 reshape 后的 operand 创建新的 tt.reduce
+
+  ```text
+    %reduce = "tt.reduce"(%inp) <{axis = 1 : i32}> ({
+      ...
+    }) : (tensor<32x128xf32, #blocked>) -> tensor<32xf32, #triton_gpu.slice<{dim = 1, parent = #blocked}>>
+    ->
+    %new_inp = tt.reshape %inp allow_reorder efficient_layout : tensor<32x128xf32, #blocked> -> tensor<32x32x4xf32, #blocked2>
+    %reduce = "tt.reduce"(%new_inp) <{axis = 2 : i32}> ({
+      ...
+    }) : (tensor<32x32x4xf32, #blocked2>) -> tensor<32x32xf32, #triton_gpu.slice<{dim = 2, parent = #blocked2}>>
+  ```
+
+- createUpdate 创建新的 reduce op user
+  - 这个 user 只有两个 operand， 一个是 reduce res，一个是 scf.for 上的 iterArg，这里创建一个新的 user
+
+- newYield 创建新的 scf.yeild
+  - 之前 updateOp 使用的 iterArg 现在直接返回，这样的话之后 canonicalize 就会将这个 arg 给消除掉
+
+  ```text
+    %old_update = arith.addf %arg4, %old_reduce : tensor<32xf32, #triton_gpu.slice<{dim = 1, parent = #blocked}>>
+    scf.yield %old_update : tensor<32xf32, #triton_gpu.slice<{dim = 1, parent = #blocked}>>
+    ->
+    %new_update = arith.addf %arg5, %new_reduce : tensor<32x32xf32, #triton_gpu.slice<{dim = 2, parent = #blocked2}>>
+    scf.yield %arg4, %new_update : tensor<32xf32, #triton_gpu.slice<{dim = 1, parent = #blocked}>>, tensor<32x32xf32, #triton_gpu.slice<{dim = 2, parent = #blocked2}>>
+  ```
+
+- createPostLoopReduce 创建 loop 后的 reduce，将拆出的额外 parallel 轴给处理掉
+
+- 一些 layout convert 处理相关的后处理，最后再插入一个 userA
 
 2.然后回过头，看 `OptimizeReshapeLayoutPattern`，这个 RewritePattern 在 `runOnOperation()` 一进来就贪心地应用了，对全部符合条件的 `tt.reshape` 操作进行 rewrite。
 
@@ -256,35 +309,78 @@ balabala
 
 ## add_pipeline
 
-`createTritonGPUPipeline`: 主要针对 DotOp 进行 global memory 到 shared memory 的数据拷贝，并做 Double Buffer 或者 N Buffer 的优化。
+`PipelinePass`: 主要针对 DotOp 进行 global memory 到 shared memory 的数据拷贝，并做 Double Buffer 或者 N Buffer 的优化。
+
+`num_stages` 用于控制软件流水展开级数
+
+Triton 中并不需要很复杂的软件流水
+
+- grid一般写成(M/BLOCK_SIZE, 1, 1)，每个job内的数据量较小
+- SM中的 warp-schedule 起到了一些流水的效果：当warp执行一个long-latency的指令时，会通过切换warp掩盖指令开销
+- NV在新架构中引入了 `cp.async` 指令，gdram -> shared memory 的拷贝可以通过DMA异步进行 -> 所以需要软件流水来优化load的行为，让循环内的load尽量可以异步
+
+-> 只需要考虑load情况，计算和访存流水靠warp scheduler这一层来处理
+
+一个matmul的计算表示ir
+
+```text
+scf.for %arg0 = %c0 to %size step %c1 {
+    load.sync A & B
+    dot A, B
+}
+```
+
+当num_stagses = 2的时候，相当于会提前加载一个iter的数据，也就是变成如下代码:
+
+```text
+load.async A0, B0
+async_wait
+scf.for %arg0 = %c1 to %size-1 step %c1 { %arg0=A0, %arg1=B0 }{
+    dot arg0, arg1
+    addptr Anext, Bnext
+    load.async Anext, Bnext
+    async_wait
+}
+async_wait
+```
+
+流水中使用的一些ir
+
+- triton_gpu.alloc_tensor : tensor<128x32xf32, #share> 申请shared memory
+- triton_gpu.insert_slice_async %src, %dst, %index ： tensor<128x32x!tt.ptr<f32>> → tensor<128x32xf32, #share> 底层对应的cp.async指令
+  - %src: 数据地址，也就是tensor<128x32x!tt.ptr<f32>>
+  - %dst: 申请的shared memory
+  - %index: 从src加载的数据插入到%dst的目标索引
+- triton_gpu.async_commit_group 底层对应的 cp.async.commit_group 指令，就是将前面的所有 cp.async 指令打包到一起执行
+- triton_gpu.async_wait {num} 底层对应的 cp.async.wait_group 指令，也就是等待前面 num 个 cp.async-groups 执行完
 
 ## add_prefetch
 
-`createTritonGPUPrefetch`：类似 pipeline pass，也是 Double buffer 和 N Buffer 的优化，区别是做 shared memory 到 register 的数据搬运。
+`PrefetchPass`：类似 pipeline pass，也是 Double buffer 和 N Buffer 的优化，区别是做 shared memory 到 register 的数据搬运。
 
 ## add_accelerate_matmul
 
-`createTritonGPUAccelerateMatmul`
+`AccelerateMatmulPass`
 
 ## add_reorder_instructions
 
-`createTritonGPUReorderInstructions`
+`ReorderInstructions`
 
 ## add_f32_dot_tc
 
-`createTritonGPUF32DotTC`
+`F32DotTCPass`
 
 ## add_optimize_dot_operands
 
-`createTritonGPUOptimizeDotOperands`
+`OptimizeDotOperandsPass`
 
 ## add_remove_layout_conversions
 
-`createTritonGPURemoveLayoutConversions`
+`RemoveLayoutConversionsPass`
 
 ## add_reduce_data_duplication
 
-`createTritonGPUReduceDataDuplication`
+`ReduceDataDuplicationPass`
 
 ## add_allocate_shared_memory
 
@@ -292,11 +388,11 @@ balabala
 
 ## add_allocate_global_scratch_memory
 
-`createTritonGPUGlobalScratchAllocationPass`
+`GlobalScratchAllocationPass`
 
 ## add_combine_tensor_select_and_if
 
-`createTritonGPUCombineTensorSelectAndIf`: 当 `arith.select` 和 `scf.if` 的 cond 相同时，将它们结合起来，大致是以下的行为。
+`CombineTensorSelectAndIfPass`: 当 `arith.select` 和 `scf.if` 的 cond 相同时，将它们结合起来，大致是以下的行为。
 
 ```text
 %select = arith.select %cond, %trueVal, %falseVal
@@ -354,8 +450,8 @@ use %select
 
 ## add_optimize_accumulator_init
 
-`createTritonGPUOptimizeAccumulatorInit`
+`OptimizeAccumulatorInitPass`
 
 ## add_loop_scheduling
 
-`createTritonGPULoopScheduling`
+`LoopSchedulingPass`

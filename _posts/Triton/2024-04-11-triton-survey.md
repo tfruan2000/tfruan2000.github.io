@@ -166,7 +166,7 @@ triton 的[组成](https://github.com/triton-lang/triton/tree/main/python/triton
 
 以 nvgpu 为例，triton-lang 的下降流程：
 
-triton-lang -> triton dialect -> triton gpu dialect -> nvgpu dialect -> llvm ir + nvvm ir -> ptx -> cubin
+triton-lang -> triton dialect -> triton gpu dialect -> triton nvgpu dialect -> llvm ir + nvvm ir -> ptx -> cubin
 
 ![triton_arch_now](/assets/img/blog/img_triton_survey/triton_arch_now.png)
 
@@ -311,7 +311,7 @@ BLOCK_SIZE = triton.next_power_of_2(n_cols)
 )
 ```
 
-任何设置这个 prune_func ? 根据经验以及硬件。
+设置这个 prune_func 需要根据经验以及硬件。
 
 ```python
 def prune_reduce_config(configs, named_args, **kwargs):
@@ -327,6 +327,8 @@ def prune_reduce_config(configs, named_args, **kwargs):
     return pruned_configs
 
 ```
+
+（3）tune config 的 过程会调用 do_bench 来多次调用 kernel 获得评估 config 的时间
 
 ### cache
 
@@ -370,7 +372,7 @@ python->ast->ttir->...
 - `constexpr_vals`： 标记为 `tl.constexpr` 的参数
 - `excess_kwargs`：`num_stages`, `num_warps`, `num_stages` 等
 
-缓存 `autotune` 中性能最好的 config 生成的 kernel。
+缓存 `autotune` 中性能最好的 config 生成的 kernel。当 key 改变时就会重新编译，也可以设置 `TRITON_ALWAYS_COMPILE=1` 来强制编译。
 
 ## backend
 
@@ -465,7 +467,7 @@ block_start = pid * BLOCK_SIZE
 offsets = block_start + tl.arange(0, BLOCK_SIZE)
 ```
 
-2. `axis` , 是说明 "循环"有几层，此处 axis = 0表示展开为1维来访问（维度概念类比memref的维度，第一维相当于memref的最内维u）
+1. `axis` , 是说明 "循环"有几层，此处 axis = 0表示展开为1维来访问
 
 axis是启动3d Grid的索引，必须是0 / 1 / 2
 
@@ -498,6 +500,8 @@ mask 为遮盖，类似decoder Attn中的mask。一是规范访存行为，防�
 
 例如offset=1024，mask为一个1024维的数组，每个数为0/1，当某位为1时，则load该数据，当某位为0时，舍弃。
 
+算法精度误差有可能就是 mask 的设定存在问题
+
 ## grid
 
 调用kernel时，需要说明该kernel执行循环有几层，每层有几次，这就是 `grid` 的概念
@@ -505,9 +509,11 @@ mask 为遮盖，类似decoder Attn中的mask。一是规范访存行为，防�
 以Matmul而言，若A为MxK，B为KxN，那么C的大小就是MxN（M和N为parallel axis大小，K为reduction轴大小）
 
 每次分块计算，单块大小BLOCK_SIZE_M x BLOCK_SIZE_N，总共进行
+
 $$
 \frac{M}{\text{BLOCK\_{SIZE}\_{M}}} \times \frac{N}{\text{BLOCK\_{SIZE}\_{N}}}
 $$
+
 Triton中关于grid定义：
 
 ```python
