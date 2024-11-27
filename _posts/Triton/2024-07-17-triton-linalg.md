@@ -1586,6 +1586,8 @@ Triton-Linalg 的 `AxisInfo` 主要使用 `AxisInfoExt` 类来记录信息。这
 - shape[0] = 8 & stride[0] = 8 & strideValue[0] = 1 -> 第 0 维上每 8 个数据连续
 - shape[1] = 32 & stride[1] = 32 & strideValue[1] = 0 -> 第 1 维上的每 32 个数据相同
 
+这意味8组，每组的32个数都相同，所以优化成少量 load 再 broadcast.
+
 ### 信息获取
 
 这些信息有两种获得途径，第一种是使用人为 `hint` 直接挂上，后续从 op 上的 attr 收集；第二种是使用 `AxisInfoAnalysis` 直接分析。
@@ -1636,7 +1638,7 @@ include/triton-linalg/Dialect/Triton/Utils/MaskTracker.h
 lib/Dialect/Triton/Utils/MaskTracker.cpp
 ```
 
-通过 `MaskTracker` 来分析 load 和 store 时所使用的mask的信息。
+通过 `MaskTracker` 来分析 load 和 store 时所使用的mask的信息。例如分析出 mask 中只有一个值是 true，那么就可以访存行为优化为 extract_slice + load
 
 ```cpp
 MaskTracker maskTracker;

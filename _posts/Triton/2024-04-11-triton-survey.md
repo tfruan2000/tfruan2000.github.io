@@ -90,7 +90,7 @@ cuda和triton编程模式对比
 
 比CUDA的SIMT编程范式，由多个thread并行处理，triton更接近SIMD编程范式，一次处理一片数据（基于block算法的编程范式）
 
-直接对线程块进行编程，每一个操作都是应用在块上，不再控制单个的线程，省去线程之间的同步等操作
+直接对线程块进行编程，每一个操作都是应用在块上，不再控制单个的线程，省去线程之间的同步等操作。将基于block的算法映射到SIMT架构上的行为由compiler来负责。
 
 ![cuda_triton](/assets/img/blog/img_triton_survey/cuda_triton.png)
 
@@ -118,10 +118,19 @@ op define + launch function + call
 ```python
 @triton.jit
 def add_kernel(
-    x_ptr,  # *Pointer* to first input vector
-    y_ptr,  # *Pointer* to second input vector
-    ...
+    x_ptr,  # *Pointer* to first input vector.
+    y_ptr,  # *Pointer* to second input vector.
+    output_ptr,  # *Pointer* to output vector.
+    n_elements,  # Size of the vector.
+    BLOCK_SIZE: tl.constexpr,  # Number of elements each program should process.
+                 # NOTE: `constexpr` so it can be used as a shape value.
+):
 ```
+
+kernel的参数类型一般是ptr/正整数/constexpr类型，如上。
+
+可见，一个数若要作为blockarg传入kernel，可以直接以正整数形式传入，也可以标记tl.constexpr，区别在于：
+`tl.constexpr` 要求编译期已知，方便进行codegen，故若在 tune config 中给出了该变量的 search space，那么会针对这些 search space 分别编译一次，保留性能最优的那此编译结果存于 cache。
 
 - launch function
 
@@ -368,11 +377,13 @@ python->ast->ttir->...
 
 这需要从 triton 何时会产生一个新 cache 讲起。 triton 会以 [key](https://github.com/triton-lang/triton/blob/main/python/triton/runtime/jit.py#L583) 为核心，key 包含 `sig_and_spec`, `constexpr_vals` 和 `excess_kwargs`。
 
-- `sig_and_spec`： 函数名 和 参数类型，直接表现在 kernel 上。当参数类型很多的时候也可以使用 `do_not_specialize` 来排除掉某些参数的影响，来避免生成更多的 kernel。
+- `sig_and_spec`： 函数名 和 参数类型(一般是ptr/正整数/constexpr类型)，直接表现在 kernel 上。当参数类型很多的时候也可以使用 `do_not_specialize` 来排除掉某些参数的影响，来避免生成更多的 kernel。
 - `constexpr_vals`： 标记为 `tl.constexpr` 的参数
-- `excess_kwargs`：`num_stages`, `num_warps`, `num_stages` 等
+- `excess_kwargs`：`num_stages`, `num_warps` 等
 
 缓存 `autotune` 中性能最好的 config 生成的 kernel。当 key 改变时就会重新编译，也可以设置 `TRITON_ALWAYS_COMPILE=1` 来强制编译。
+
+-> tune config 个数增加，也会触发重新编译，因为要对新增的 config 进行性能衡量(tune的过程会对每一条config调用do_bench)
 
 ## backend
 
