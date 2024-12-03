@@ -324,3 +324,123 @@ mlir的项目中，头文件的写法都有传统的include guard，用 `ifdef` 
 
 #endif TRITON_LINALG_CONVERSION_ARITHTOLINALG_ARITHTOLINALG_H
 ```
+
+# template
+
+## is_same_v
+
+当两个函数只有一个输入变量的类型不同时，可以使用 `template + is_same_v` 来简化函数
+
+例如某个函数的 ranges 变量可能是 `ArrayRef<Range>` 也可能是 `ArrayRef<OpFoldResult>` 时
+
+```cpp
+template <typename RangeType>
+static void setExtractSliceOpParam(RewriterBase &b,
+                                   SmallVector<OpFoldResult> &reductionOffsets,
+                                   SmallVector<OpFoldResult> &reductionSizes,
+                                   SmallVector<OpFoldResult> &reductionStrides,
+                                   RangeType ranges, int64_t reductionDim,
+                                   Value offset, Value size) {
+  size_t rank = ranges.size();
+  reductionOffsets.reserve(rank);
+  reductionSizes.reserve(rank);
+  reductionStrides.reserve(rank);
+  for (size_t idx = 0; idx < rank; ++idx) {
+    reductionStrides.push_back(b.getIndexAttr(1));
+    if (idx != reductionDim) {
+      if constexpr (std::is_same_v<RangeType, ArrayRef<OpFoldResult>>) {
+        reductionOffsets.push_back(b.getIndexAttr(0));
+        reductionSizes.push_back(ranges[idx]);
+      } else {
+        reductionOffsets.push_back(ranges[idx].offset);
+        reductionSizes.push_back(ranges[idx].size);
+      }
+    }
+    }
+  }
+}
+```
+
+## 类型特殊化
+
+当有多个同类函数只有一个输入类型不同，例如下面这段代码，参数基本一致，最基础的函数中实现是根据 `defineOp`  来进行 `TypeSwitch`
+
+```cpp
+Operation *traceBackwardToDefineOp(OpBuilder &rewriter, Operation *defineOp,
+                                   ArrayRef<int64_t> currPerms,
+                                   Operation *opBeingCrossed);
+Operation *traceBackwardToDefineOp(OpBuilder &rewriter,
+                                   linalg::BroadcastOp broadcastOp,
+                                   ArrayRef<int64_t> currPerms,
+                                   Operation *opBeingCrossed);
+Operation *traceBackwardToDefineOp(OpBuilder &rewriter,
+                                   tensor::ExpandShapeOp expandOp,
+                                   ArrayRef<int64_t> currPerms);
+Operation *traceBackwardToDefineOp(OpBuilder &rewriter,
+                                   tensor::CollapseShapeOp collapseOp,
+                                   ArrayRef<int64_t> currPerms);
+Operation *traceBackwardToDefineOp(OpBuilder &rewriter, linalg::MapOp mapOp,
+                                   ArrayRef<int64_t> currPerms);
+```
+
+那么这些函数可以利用类型化来简化
+
+```cpp
+template <typename OpType>
+Operation *traceBackwardToDefineOp(OpBuilder &rewriter, OpType op,
+                                   ArrayRef<int64_t> currPerms,
+                                   Operation *opBeingCrossed = nullptr);
+
+// 特化实现
+
+
+template <>
+template <>
+Operation *TransCollapseDriver::traceBackwardToDefineOp(
+    OpBuilder &rewriter, linalg::BroadcastOp broadcastOp,
+    ArrayRef<int64_t> currPerms, Operation *opBeingCrossed) {
+  // ...
+}
+
+template <>
+Operation *TransCollapseDriver::traceBackwardToDefineOp(
+    OpBuilder &rewriter, tensor::ExpandShapeOp expandOp,
+    ArrayRef<int64_t> currPerms, Operation *opBeingCrossed) {
+  // ...
+}
+
+template <>
+Operation *TransCollapseDriver::traceBackwardToDefineOp(
+    OpBuilder &rewriter, tensor::CollapseShapeOp collapseOp,
+    ArrayRef<int64_t> currPerms, Operation *opBeingCrossed) {
+  // ...
+}
+
+template <>
+Operation *traceBackwardToDefineOp(OpBuilder &rewriter, linalg::MapOp *mapOp,
+                                   ArrayRef<int64_t> currPerms,
+                                   Operation *opBeingCrossed) {
+  // ...
+}
+
+template <>
+Operation *traceBackwardToDefineOp(OpBuilder &rewriter, Operation *defineOp,
+                                   ArrayRef<int64_t> currPerms,
+                                   Operation *opBeingCrossed) {
+  return llvm::TypeSwitch<Operation *, Operation *>(defineOp)
+      .Case<linalg::BroadcastOp>([&](linalg::BroadcastOp broadcastOp) {
+        return traceBackwardToDefineOp(rewriter, broadcastOp, currPerms,
+                                       opBeingCrossed);
+      })
+      .Case<tensor::ExpandShapeOp>([&](tensor::ExpandShapeOp expandOp) {
+        return traceBackwardToDefineOp(rewriter, expandOp, currPerms);
+      })
+      .Case<tensor::CollapseShapeOp>([&](tensor::CollapseShapeOp collapseOp) {
+        return traceBackwardToDefineOp(rewriter, collapseOp, currPerms);
+      })
+      .Case<linalg::MapOp>([&](linalg::MapOp mapOp) {
+        return traceBackwardToDefineOp(rewriter, mapOp, currPerms);
+      })
+      .Default([](Operation *otherOp) { return nullptr; });
+}
+```

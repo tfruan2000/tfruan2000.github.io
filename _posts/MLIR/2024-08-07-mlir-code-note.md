@@ -3160,6 +3160,22 @@ def SPIRV_FunctionCallOp : SPIRV_Op<"FunctionCall", [
 
 # llvm
 
+很多下面的函数都在 c++ 中有相应实现，但 LLVM 重新实现了一遍，例如工具类 cast / dyn_cast 等, 数据结构类 SmallVector / DenseMap 等，
+这种设计是出于性能、灵活性和代码一致性的考虑。
+
+1.性能问题
+
+c++ 的 dynamic_cast 是 RTTI (运行时类型识别机制的一种)，依赖编译器生成的类性信息 (如虚表) 来完成类型检查和类型转换，这种机制会造成额外的运行时开销。
+而 dyn_cast 是一个轻量级实现，避免了 RTTI 导致的开销。
+
+> 其实 LLVM的代码中 RTTI 通常是禁用的，方便减小二进制文件大小。
+
+SmallVector 这类数据结构利用栈的特性优化。
+
+2.类型层次较深
+
+LLVM 的众多类有深层次的类继承结构和众多的类型检查需求。
+
 ## LogicalResult
 
 - 函数内用 success() / failure() 作为返回
