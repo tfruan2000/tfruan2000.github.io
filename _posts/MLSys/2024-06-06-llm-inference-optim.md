@@ -134,4 +134,67 @@ mlir 中的任务调度和软流水一般在 hardware dialect 做，接近直接
 
 软件流水是从最内层展开的(最内层for循环展开)，将片外数据传递、片上访存、计算指令根据依赖排开。
 
-软件流水一般将指令分为 prologue、computation、epilogue 三类。
+软件流水一般将指令分为 prologue、computation、epilogue 三类。流水展开针对的是 for 循环。
+
+过程：
+
+1.构建依赖关系图
+
+使用 bool 类型的二维数组记录 op 之间的关系，这里不记录标量计算，如果在 memref 上，则需要考虑 alias 关系。
+
+2.划分stage
+
+同 stage 内的 op 要求:
+
+(1) 无依赖
+
+(2) 有依赖但占用相同的计算资源(如都占用向量计算资源 / io资源)
+
+当相邻 op 存在数据依赖且占据不同计算资源时，如 copy + add ，那么将其分到不同的 stage 上去
+
+3.分析需要跨 stage 的值及其份数
+
+通过多消耗资源来解除数据依赖，要分析空间复用，不能无脑 alloc
+
+4.分析stage 之间的 delay
+
+根据 stage 之间的依赖关系分析 delay，默认情况下 delay = 0，例如对 scf.forOp 的 iter_args 参数，进行修改和使用
+
+5.展开(重写 for 循环)
+
+- Iteration的数量小于stage数量，因此无法形成Kernel部分，会进行完全展开，op会被复制Iteration次
+
+- 带有kernel的静态展开
+
+```text
+scf.for %arg0 = %c0 to %c4 step %c1 {
+    Stage 0
+    Stage 1
+    Stage 2
+}
+
+->
+
+scf.if %true {
+    Stage 0
+
+    sync
+    Stage 1
+    Stage 0
+
+    sync
+    scf.for %arg0 = %c0 to %c2 step %c1 {
+        Stage 2
+        Stage 1
+        Stage 0
+        sync
+    }
+    Stage 2
+    Stage 1
+
+    sync
+    Stage 2
+
+    sync
+}
+```

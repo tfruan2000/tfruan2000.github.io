@@ -1892,7 +1892,8 @@ mlir/include/mlir/Dialect/Linalg/IR/LinalgInterfaces.td
 
 ```cpp
   SmallVector<Operation *, 4> combinerOps;
-  if (!matchReduction(op.getRegionOutputArgs(), 0, combinerOps))
+  if (!matchReduction(op.getRegionOutputArgs(), 0, combinerOps) ||
+      combinerOps.size() != 1)
     return failure();
   Operation *payloadOp = combinerOps[0];
 ```
@@ -1972,6 +1973,16 @@ mlir/lib/Dialect/SCF/IR/SCF.cpp
              // ...
           }
         }
+    ```
+
+    创建一个新的 forall
+
+    ```cpp
+    auto newforallOp = rewriter.create<scf::ForallOp>(
+        loc, forallOp.getMixedLowerBound(), forallOp.getMixedUpperBound(),
+        forallOp.getMixedStep(), forallOp.getOutputs(), forallOp.getMapping());
+    rewriter.eraseBlock(newforallOp.getBody());
+    newforallOp.getRegion().takeBody(forallOp.getRegion());
     ```
 
 - scf.if
@@ -4692,7 +4703,9 @@ Symbol 提供了一种非 SSA 机制(SSA机制采用值引用的方法)的引用
 
 换言之，可以把 Symbol 理解为一种带有名称的操作，例如 func 和 module 上挂的名字，而 SymbolTable 负责记录，其中的所有 Symbol 名称唯一。SymbolTable 能够通过作用域的隔离性，保证多线程环境下的安全性。作为 Symbol 的类必须实现 `SymbolOpInterface`。
 
-> 例如 `func.call` op 的`SymbolTable` 中存在其使用的 `func.func` 对象名称(func.func的名字确实不能重复)。
+常见的 symbol 有 funcOp、 memref.global
+
+> 例如 `func.call` op 的 `SymbolTable` 中存在其使用的 `func.func` 对象名称(func.func的名字确实不能重复)。
 
 使用 Symbol 的方式访问 global value or vairable，可以实现 **multi-threaded compilation without this locking**。
 
@@ -4752,27 +4765,19 @@ SymbolDCE pass 应该在有 `OpTrait::SymbolTable` operation 的开始运行。
 - SymbolTable::SymbolUse
   - getUser() 返回该symbol ref的user operation
 
-## SymbolUse
+## SymbolUserMap
+
+表示 a map of symbols to users，前文提到 symbol 是“一种带有名称的操作”， `SymbolUserMap` 用来存储这种 symbol 的 users
+
+例如消除没有 user 的 memref.global
 
 ```cpp
-class SymbolUse {
-public:
-  SymbolUse(Operation *op, SymbolRefAttr symbolRef)
-      : owner(op), symbolRef(symbolRef) {}
-
-  /// Return the operation user of this symbol reference.
-  Operation *getUser() const { return owner; }
-
-  /// Return the symbol reference that this use represents.
-  SymbolRefAttr getSymbolRef() const { return symbolRef; }
-
-private:
-  /// The operation that this access is held by.
-  Operation *owner;
-
-  /// The symbol reference that this use represents.
-  SymbolRefAttr symbolRef;
-};
+SymbolTableCollection symbolTable;
+SymbolUserMap symbolUsers(symbolTable, root);
+root->walk([&](memref::GlobalOp global) {
+  if (symbolUsers.getUsers(global).empty() && global.isPrivate())
+    global->erase();
+});
 ```
 
 ---
