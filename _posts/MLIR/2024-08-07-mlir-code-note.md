@@ -2433,6 +2433,7 @@ begin() / end() 都是以 Children 为对象。下面的代码是CSE pass遇见�
 - Type getFunctionType()
 - Region &getFunctionBody()
 - BlockArgListType getArguments()
+- bool isDeclaration() 如果为 true 则表示该func只是一个声明，而没有具体的实现
 
 ---
 
@@ -4374,7 +4375,7 @@ static void tileOpImpl(PatternRewriter &rewriter, Operation *op,
                        ArrayAttr tileSize) {
   DBGS() << "Enter rewrite rule [tileOp], with target op: ";
   LLVM_DEBUG(op->print(DBGS()));
-  auto handle = getLastMatchOpSetRewriter(rewriter, op); // 当前 transform sequence 中最后一个 matchOp
+  auto handle = getLastMatchOpAndSetRewriter(rewriter, op); // 当前 transform sequence 中最后一个 matchOp
   if (failed(handle)) return;
   MLIRContext *context = op->getContext();
   auto pdlOpType = pdl::OperationType::get(context);
@@ -4462,6 +4463,90 @@ parsePdllSourceFile(llvm::StringRef pdllSource, MLIRContext *context) {
   if (failed(module))
     return OwningOpRef<ModuleOp>();
   return codegenPDLLToMLIR(context, astContext, sourceMgr, **module);
+}
+
+struct AutoScheduler : public AutoSchedulerPassBase<AutoScheduler> {
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<::mlir::transform::TransformDialect>();
+    codegen::registerAllDialects(registry);
+  }
+  void runOnOperation() override {
+    ...
+    OwningOpRef<ModuleOp> pdllModuleOp =
+        parsePdllSourceFile(StringRef(pdllSource), context);
+    if (!parsePdllSourceFile) {
+      return signalPassFailure();
+    }
+    RewritePatternSet patternSet(context);
+    PDLPatternModule patternModule(std::move(pdlModuleOp));
+    patternSet.add(std::move(patternModule));
+    // Register pattern rules.
+    registerRuleFunctions(patternSet);
+
+    // match and rewrite
+    ...
+  }
+}
+```
+
+## 匹配 pattern
+
+```cpp
+  // class element
+  using PatternStateMap = llvm::DenseMap<const Pattern *, Operation *>;
+  PatternApplicator matcher;
+  std::unique_ptr<PatternRewriter> rewriter;
+
+LogicalResult XXXX::applyPatterns(
+    Operation *module, PatternStateMap &patternStateMap) {
+  auto callback = [&](Operation *op) {
+    auto onSuccess = [&](const Pattern &pattern) -> LogicalResult {
+      patternStateMap[&pattern] = op;
+      return success();
+    };
+    auto canApply = [&](const Pattern &pattern) -> bool {
+      return patternStateMap.find(&pattern) != patternStateMap.end();
+    };
+    if (succeeded(
+            matcher.matchAndRewrite(op, *rewriter, canApply, {}, onSuccess))) {
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  };
+
+  WalkResult walkRes = module->walk(callback);
+  // 一次只匹配一个 pattern
+  // apply 成功后 transform ir 就会写到 module 上
+  return walkRes.wasInterrupted();
+}
+
+static LogicalResult applyTransformOps(Operation *module) {
+  PassManager passManager(module->getContext(),
+                          module->getName().getStringRef(),
+                          OpPassManager::Nesting::Implicit);
+  passManager.addPass(createTransformDialectInterpreterPass());
+  passManager.addPass(createTransformDialectErasePass());
+  return passManager.run(module);
+}
+
+LogicalResult XXXX::runLoop(Module module) {
+  auto *context = module->getContext();
+  OpBuilder builder(context);
+  PatternStateMap patternStateMap;
+  OwningOpRef<ModuleOp> tmpModuleRef(cast<ModuleOp>(module->clone()));
+  while (true) {
+    if (failed(applyPatterns(tmpModuleRef->getOperation(), patternStateMap))) {
+      // No pattern to match.
+      break;
+    }
+    auto seqCount =
+        cloneAllTransformSequences(module, tmpModuleRef->getOperation());
+    if (failed(applyTransformOps(tmpModuleRef->getOperation()))) {
+      popBackTransformSequence(module, seqCount);
+      tmpModuleRef = ModuleOp(module->clone());
+      (void)applyTransformOps(tmpModuleRef->getOperation());
+    }
+  }
 }
 ```
 

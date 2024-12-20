@@ -533,7 +533,7 @@ input 和 values 是等维度的
 
 > 例如 values = [4], 则 input 可以是 [0, 1, 2, 3, 8, 9, 10, 11]
 
-- max_constany(input, values)：对于每个维度i，标识input[i]中 每values[i]个相邻元素 是常数
+- max_constancy(input, values)：对于每个维度i，标识input[i]中 每values[i]个相邻元素 是常数
 
 > 例如 values = [4], 则 input 可以是 [0, 0, 0, 0, 1, 1, 1, 1]
 
@@ -556,7 +556,7 @@ tmp = 1
 def mul_acc(x, l, h):
     tmp = 1
     for i in rang(l, h)
-        tmp *= i
+        tmp *= x[i]
     return tmp
 
 ->
@@ -567,7 +567,7 @@ def binary_mul(x, l, h):
     if h - l == 1:
         return x[l]
     mid = (l + h) // 2
-    return binary_mul(x, l, mid) + binary_mul(x, mid, h)
+    return binary_mul(x, l, mid) * binary_mul(x, mid, h)
 ```
 
 以优化 flaggems 中的 [prod](https://github.com/FlagOpen/FlagGems/blob/master/src/flag_gems/ops/prod.py#L18) 为例：
@@ -617,7 +617,7 @@ def prod_kernel_mid(
 # grid = lambda META: min((triton.cdiv(M, MEAT['BLOCK_SIZE']), MAX_GRID_NUM),)
 ```
 
-然后将 `_tmp` 的 累乘优化为二分乘法（`reduce_mul`->归约规约）
+然后将 `_tmp` 的 累乘优化为二分乘法（`reduce_mul`->归约）
 
 ```python
 mid_value = tl.reduce(_tmp, axis=0, combine_fn=reduce_mul)
@@ -629,7 +629,7 @@ tl.store(mid_ptr + pid, mid_value.to(inp_val.dtype))
 # triton.Config({"BLOCK_SIZE": m} for m in [...])
 # "ITER_NUM" 为 BLOCK_SIZE 能整除2的次数
 # 以 BLOCK_SIZE = 16 为例，ITER_NUM=4
-# 例： x   _tmp[:BLOCK_SIZE // (2 ** 1)]   _tmp[BLOCK_SIZE // (2 ** 1):BLOCK_SIZE // (2 ** (x - 1))]
+# 例： x   _tmp[:BLOCK_SIZE // (2 ** x)]   _tmp[BLOCK_SIZE // (2 ** x):BLOCK_SIZE // (2 ** (x - 1))]
 #     1   _tmp[:8]                        _tmp[8:16]
 #     2   _tmp[:4]                        _tmp[4:8]
 #     3   _tmp[:2]                        _tmp[2:4]

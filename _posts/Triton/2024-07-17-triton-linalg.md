@@ -1508,8 +1508,8 @@ struct PtrInfo {
 
 - broadcast 表示最低维的数据是broadcast的行为的，例如`1111222233334444...kkkk`，这里的 broadcastSize 就是 4
 
-> 这对应着 `tl.max_constany`
-> max_constany(input, values)：对于每个维度i，标识input[i]中 每values[i]个相邻元素 是常数
+> 这对应着 `tl.max_constancy`
+> max_constancy(input, values)：对于每个维度i，标识input[i]中 每values[i]个相邻元素 是常数
 > 例如 values = [4], 则 input 可以是 [0, 0, 0, 0, 1, 1, 1, 1]
 {: .prompt-info }
 
@@ -1594,7 +1594,7 @@ Triton-Linalg 的 `AxisInfo` 主要使用 `AxisInfoExt` 类来记录信息。这
 
 - hint
 
-hint 的方式是人为在写 kernel 时通过 `max_contiguous`、`max_constany`、`multiple_of` 等 [hint op](https://triton-lang.org/main/python-api/triton.language.html#compiler-hint-ops) 来提示编译器数据的特殊性，以指导编译器的下降行为。人为给定的hint的优先级高于分析出来的。
+hint 的方式是人为在写 kernel 时通过 `max_contiguous`、`max_constancy`、`multiple_of` 等 [hint op](https://triton-lang.org/main/python-api/triton.language.html#compiler-hint-ops) 来提示编译器数据的特殊性，以指导编译器的下降行为。人为给定的hint的优先级高于分析出来的。
 
 ```cpp
 // lib/Dialect/Triton/Interfaces/InferAxisInfoInterface.cpp
