@@ -1063,9 +1063,14 @@ getBlock()
 - create(OperationState)
 
   ```cpp
-  OperationState state(op->getLoc(), op->getName().getStringRef(), operands,
-                       newResults, op->getAttrs(), op->getSuccessors());
-  Operation *newOp = rewriter.create(state);
+  OperationState state(op->getLoc(), op->getName().getStringRef(),
+                       {newInput, newKernel, newInit}, {resTy}, op->getAttrs(),
+                       op->getSuccessors());
+  for (Region &r : op->getRegions()) {
+    Region *newRegion = state.addRegion();
+    b.cloneRegionBefore(r, *newRegion, newRegion->begin());
+  }
+  Operation *newOp = b.create(state);
   ```
 
 4.替换
@@ -3642,6 +3647,8 @@ tip: 如果需要在循环中查找，建议使用 `DenseSet`, `DenseMap` 类数
 - llvm:TypeSwitch
 
 常用在模板输入的pattern中，某些op需要额外的处理，例如构建某些op的时候需要额外set一些属性
+
+记得第一个参数如果是算子,要使用 `getOperation()` 方法转为 `Operation*`
 
 ```cpp
 auto newOp = clone(rewriter, op, TypeRange{newResType}, newOperands);
