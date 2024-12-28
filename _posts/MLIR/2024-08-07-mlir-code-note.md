@@ -655,7 +655,7 @@ ArrayAttr tmp = ArrayAttr::get(context, mappings)
 
 ## operation、attribute、type关系
 
-| 专用指针      | 通用指针     | 值               |
+| 专用指针    | 通用指针    | 值               |
 |-------------|-------------|------------------|
 | AddOp       | Operation * | Operation        |
 | IntegerType | Type        | TypeStorage      |
@@ -4774,10 +4774,10 @@ markAnalysesPreserved<DominanceInfo, PostDominanceInfo>();
 | ValueRange          | ValueRange(ArrayRef<Value>) / ValueRange(ArrayRef<BlockArgument>) |
 |---------------------|-------------------------------------------------------------------|
 | TypeRange           | TypeRange(ArrayRef<Type> types)                                   |
-| ValueTypeRange      | 代表给定value的type                                                 |
-| OperandRange        | TypeRange(ArrayRef<Operand> types)，常当 `ArrayRef<Value>` 使用     |
+| ValueTypeRange      | 代表给定value的type                                               |
+| OperandRange        | TypeRange(ArrayRef<Operand> types)，常当 `ArrayRef<Value>` 使用    |
 | ResultRange         | TypeRange(ArrayRef<OpResult> types)                               |
-| MutableOperandRange | 可以进行修改操作 append / assign / erase                             |
+| MutableOperandRange | 可以进行修改操作 append / assign / erase                          |
 
 ---
 
@@ -5236,6 +5236,37 @@ def FuseIntoContainingOp :
     result.addTypes({resultType, resultType});
   }
   ```
+
+## TD中定义RewritePattern
+
+上述TD都是用来定义op、dialect、pass的玩法，其实还可以用它来写一些RewritePattern，本质上也是match+rewrite，例如Triton官方的[lib/Dialect/Triton/Transforms/Combine.td](https://github.com/triton-lang/triton/blob/main/lib/Dialect/Triton/Transforms/Combine.td)。
+
+例如用 TD 写一些 arith op 的变换 pattern
+
+```cpp
+include "mlir/IR/PatternBase.td"
+include "mlir/Dialect/Arith/IR/ArithOps.td"
+include "mlir/Dialect/Math/IR/MathOps.td"
+
+// select(cmpi(uge or ugt, x, y), x, y) -> maxui(x, y)
+def SelectOfCmpIToMaxUI0:
+    Pat<(SelectOp (Arith_CmpIOp $pred, $x, $y), $x, $y),
+        (Arith_MaxUIOp $x, $y),
+        [(Constraint<
+            CPred<"$0.getValue() == arith::CmpIPredicate::uge || "
+                  "$0.getValue() == arith::CmpIPredicate::ugt">> $pred)]>;
+// 把 uge or ugt 换成 sge or sgt，maxui 换乘 maxsi
+
+// select(cmpi(ule or ult, y, x), x, y) -> maxui(x, y)
+def SelectOfCmpIToMaxUI1:
+    Pat<(SelectOp (Arith_CmpIOp $pred, $y, $x), $x, $y),
+        (Arith_MaxUIOp $x, $y),
+        [(Constraint<
+            CPred<"$0.getValue() == arith::CmpIPredicate::ule || "
+                  "$0.getValue() == arith::CmpIPredicate::ult">> $pred)]>;
+// 把 ule or ult 换成 sle or slt，maxui 换乘 maxsi
+
+```
 
 ---
 
