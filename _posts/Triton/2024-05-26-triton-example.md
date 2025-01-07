@@ -8,11 +8,254 @@ tags: [Triton, Kernel, Matmul]
 
 Triton Kernel 的写法可以参考：官方 [tutorial](https://triton-lang.org/main/getting-started/tutorials/index.html)
 
+# add
+
+```python
+import torch
+import triton
+import triton.language as tl
+
+@triton.jit
+def add_kernel(
+    a_ptr,       # 输入向量 A 的指针
+    b_ptr,       # 输入向量 B 的指针
+    output_ptr,  # 输出向量的指针
+    N,           # 向量长度
+    BLOCK_SIZE: tl.constexpr):
+
+    # 线程处理的索引
+    idx = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = idx < N
+
+    # 加载 A 和 B
+    a = tl.load(a_ptr + idx, mask=mask, other=0.0)
+    b = tl.load(b_ptr + idx, mask=mask, other=0.0)
+
+    # 执行加法
+    result = a + b
+
+    # 写入输出
+    tl.store(output_ptr + idx, result, mask=mask)
+
+# 使用示例
+def vector_add(a, b):
+    import torch
+
+    N = a.shape[0]
+    assert a.shape == b.shape, "A 和 B 必须具有相同的形状。"
+
+    output = torch.empty_like(a)
+
+    BLOCK_SIZE = 128
+    grid = ((N + BLOCK_SIZE - 1) // BLOCK_SIZE, )
+
+    add_kernel[
+        grid
+    ](
+        a, b, output, N, BLOCK_SIZE
+    )
+
+    return output
+
+if __name__ == "__main__":
+    import torch
+
+    # 随机生成两个向量 A 和 B
+    N = 128
+    a = torch.randn(N, dtype=torch.float32, device='cuda')
+    b = torch.randn(N, dtype=torch.float32, device='cuda')
+
+    # 调用 vector_add 函数
+    output = vector_add(a, b)
+```
+
+# laynernorm
+
+最简单的实现
+
+```python
+import torch
+
+import triton
+import triton.language as tl
+
+@triton.jit
+def layernorm_kernel(
+    input_ptr,     # 输入张量指针
+    output_ptr,    # 输出张量指针
+    weight_ptr,     # 缩放参数指针
+    bias_ptr,      # 偏移参数指针
+    M,             # 行数
+    N: tl.constexpr,             # 列数
+    epsilon,       # 防止除以 0 的
+    BLOCK_SIZE: tl.constexpr):
+
+    # 计算当前线程处理的行索引
+    row_idx = tl.program_id(0)
+
+    # 计算该行的起始地址
+    row_start = row_idx * N
+
+    # 加载该行的数据到共享内存
+    row = tl.load(input_ptr + row_start + tl.arange(0, N))
+
+    # Step 1: 计算均值
+    mean = tl.sum(row, axis=0) / N
+
+    # Step 2: 计算方差
+    var = tl.sum(tl.pow((row - mean), 2), axis=0) / N
+
+    # Step 3: 标准化
+    norm_row = (row - mean) / tl.sqrt(var + epsilon)
+
+    # Step 4: 应用权重
+    weight = tl.load(weight_ptr + tl.arange(0, N))
+    bias = tl.load(bias_ptr + tl.arange(0, N))
+    result = norm_row * weight + bias
+
+    # Step 5: 写入输出
+    tl.store(output_ptr + row_start + tl.arange(0, N), result)
+
+# 使用示例
+def layernorm(input, weight, bias, epsilon=1e-5):
+    import torch
+
+    M, N = input.shape
+    output = torch.empty_like(input)
+
+    # 确保 weight 和 bias 的形状一致
+    assert weight.shape[0] == bias.shape[0] == N
+
+    # 分配块大小
+    BLOCK_SIZE = 128  # 假设列数是 BLOCK_SIZE 的倍数
+
+    grid = (M,)  # 每一行一个块
+
+    # 调用 Triton 内核
+    layernorm_kernel[
+        grid
+    ](
+        input,
+        output,
+        weight,
+        bias,
+        M,
+        N,
+        epsilon,
+        BLOCK_SIZE
+    )
+
+    return output
+
+
+if __name__ == "__main__":
+
+    # 随机生成输入张量
+    M, N = 32, 128  # 假设有 32 行，每行 128 列
+    input = torch.randn(M, N, dtype=torch.float32, device='cuda')
+    weight = torch.randn(N, dtype=torch.float32, device='cuda')
+    bias = torch.randn(N, dtype=torch.float32, device='cuda')
+
+    # 调用 layernorm 函数
+    output = layernorm(input, weight, bias)
+```
+
 # matmul
 
-来自 [03-mm](https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html)
+## 简单的 matmul
 
-## 源码说明
+```python
+import torch
+
+import triton
+import triton.language as tl
+
+@triton.jit
+def matmul_kernel(
+    a_ptr,       # 矩阵 A 的指针
+    b_ptr,       # 矩阵 B 的指针
+    c_ptr,       # 矩阵 C 的指针
+    M,           # A 的行数
+    N,           # B 的列数
+    K,           # A 的列数 / B 的行数
+    BLOCK_SIZE_M: tl.constexpr,  # 每个块的行数
+    BLOCK_SIZE_N: tl.constexpr,  # 每个块的列数
+    BLOCK_SIZE_K: tl.constexpr   # 中间维度的块大小
+):
+    # 计算当前线程块的起始索引
+    pid_m = tl.program_id(0)
+    pid_n = tl.program_id(1)
+
+    # 确定块的起始位置
+    block_m = pid_m * BLOCK_SIZE_M
+    block_n = pid_n * BLOCK_SIZE_N
+
+    # 初始化累积值
+    c = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+
+    # 循环处理中间维度的块
+    for k in range(0, K, BLOCK_SIZE_K):
+        # 加载 A 和 B 的块
+        a = tl.load(
+            a_ptr + (block_m + tl.arange(0, BLOCK_SIZE_M))[:, None] * K + (k + tl.arange(0, BLOCK_SIZE_K)),
+            mask=(block_m + tl.arange(0, BLOCK_SIZE_M))[:, None] < M,
+            other=0.0
+        )
+        b = tl.load(
+            b_ptr + (k + tl.arange(0, BLOCK_SIZE_K))[:, None] * N + (block_n + tl.arange(0, BLOCK_SIZE_N)),
+            mask=(k + tl.arange(0, BLOCK_SIZE_K))[:, None] < K,
+            other=0.0
+        )
+
+        # 计算局部矩阵乘法并累积
+        c += tl.dot(a, b)
+
+    # 将结果写回 C
+    tl.store(
+        c_ptr + (block_m + tl.arange(0, BLOCK_SIZE_M))[:, None] * N + (block_n + tl.arange(0, BLOCK_SIZE_N)),
+        c,
+        mask=((block_m + tl.arange(0, BLOCK_SIZE_M))[:, None] < M) & ((block_n + tl.arange(0, BLOCK_SIZE_N)) < N)
+    )
+
+# 使用示例
+def matmul(a, b):
+    import torch
+
+    M, K = a.shape
+    K_b, N = b.shape
+    assert K == K_b, "A 的列数必须等于 B 的行数。"
+
+    c = torch.empty((M, N), dtype=torch.float32, device='cuda')
+
+    BLOCK_SIZE_M = 32
+    BLOCK_SIZE_N = 32
+    BLOCK_SIZE_K = 32
+
+    grid = ((M + BLOCK_SIZE_M - 1) // BLOCK_SIZE_M, (N + BLOCK_SIZE_N - 1) // BLOCK_SIZE_N, 1)
+
+    matmul_kernel[
+        grid
+    ](
+        a, b, c, M, N, K, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K
+    )
+
+    return c
+
+if __name__ == "__main__":
+    import torch
+
+    # 随机生成两个矩阵 A 和 B
+    M, K, N = 128, 128, 128
+    a = torch.randn((M, K), dtype=torch.float32, device='cuda')
+    b = torch.randn((K, N), dtype=torch.float32, device='cuda')
+
+    # 调用 matmul 函数
+    c = matmul(a, b)
+```
+
+## tutorial_mm 源码说明
+
+来自 [03-mm](https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html)
 
 以 [tutorials/03-matrix-multiplication.py](https://github.com/triton-lang/triton/blob/main/python/tutorials/03-matrix-multiplication.py) 中矩阵乘优化为例。
 
@@ -358,3 +601,218 @@ def bmm(a, b, activation=""):
     )
     return c
 ```
+
+
+# attention
+
+## scaled_dot_product_attention_kernel
+
+```python
+import torch
+
+import triton
+import triton.language as tl
+
+@triton.jit
+def scaled_dot_product_attention_kernel(
+    q_ptr,       # Query 矩阵指针
+    k_ptr,       # Key 矩阵指针
+    v_ptr,       # Value 矩阵指针
+    o_ptr,       # 输出矩阵指针
+    M,           # Query 的行数
+    N,           # Key 的列数 / Value 的列数
+    K,           # Query 的列数 / Key 的行数
+    SCALE,       # 缩放因子
+    BLOCK_SIZE_M: tl.constexpr,  # 每个块的行数
+    BLOCK_SIZE_N: tl.constexpr,  # 每个块的列数
+    BLOCK_SIZE_K: tl.constexpr   # 中间维度的块大小
+):
+    # 当前块的起始索引
+    pid_m = tl.program_id(0)
+    pid_n = tl.program_id(1)
+
+    # 块的起始位置
+    block_m = pid_m * BLOCK_SIZE_M
+    block_n = pid_n * BLOCK_SIZE_N
+
+    # 初始化累积值
+    output = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+
+    # 循环处理中间维度的块
+    for k in range(0, K, BLOCK_SIZE_K):
+        # 加载 Query 和 Key 的块
+        q = tl.load(
+            q_ptr + (block_m + tl.arange(0, BLOCK_SIZE_M))[:, None] * K + (k + tl.arange(0, BLOCK_SIZE_K)),
+            mask=(block_m + tl.arange(0, BLOCK_SIZE_M))[:, None] < M,
+            other=0.0
+        )
+        k_block = tl.load(
+            k_ptr + (k + tl.arange(0, BLOCK_SIZE_K))[:, None] * N + (block_n + tl.arange(0, BLOCK_SIZE_N)),
+            mask=(k + tl.arange(0, BLOCK_SIZE_K))[:, None] < K,
+            other=0.0
+        )
+
+        # 计算缩放点积并应用 softmax（近似处理，仅按列归一化）
+        logits = tl.dot(q, k_block) * SCALE
+        max_logits = tl.max(logits, axis=1)
+        logits_exp = tl.exp(logits - max_logits[:, None])
+        softmax = logits_exp / tl.sum(logits_exp, axis=1)[:, None]
+
+        # 加载 Value 的块并计算加权求和
+        v = tl.load(
+            v_ptr + (k + tl.arange(0, BLOCK_SIZE_K))[:, None] * N + (block_n + tl.arange(0, BLOCK_SIZE_N)),
+            mask=(k + tl.arange(0, BLOCK_SIZE_K))[:, None] < K,
+            other=0.0
+        )
+        output += tl.dot(softmax, v)
+
+    # 写回结果
+    tl.store(
+        o_ptr + (block_m + tl.arange(0, BLOCK_SIZE_M))[:, None] * N + (block_n + tl.arange(0, BLOCK_SIZE_N)),
+        output,
+        mask=((block_m + tl.arange(0, BLOCK_SIZE_M))[:, None] < M) & ((block_n + tl.arange(0, BLOCK_SIZE_N)) < N)
+    )
+
+# 使用示例
+def scaled_dot_product_attention(q, k, v, scale):
+    import torch
+
+    M, K = q.shape
+    K_k, N = k.shape
+    K_v, N_v = v.shape
+    assert K == K_k == K_v, "Q, K, V 的列数必须一致。"
+    assert N == N_v, "K 和 V 的列数必须一致。"
+
+    o = torch.empty((M, N), dtype=torch.float32, device='cuda')
+
+    BLOCK_SIZE_M = 32
+    BLOCK_SIZE_N = 32
+    BLOCK_SIZE_K = 32
+
+    grid = ((M + BLOCK_SIZE_M - 1) // BLOCK_SIZE_M, (N + BLOCK_SIZE_N - 1) // BLOCK_SIZE_N)
+
+    scaled_dot_product_attention_kernel[
+        grid
+    ](
+        q, k, v, o, M, N, K, scale, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K
+    )
+
+    return o
+
+if __name__ == "__main__":
+    import torch
+
+    # 随机生成 Query, Key, Value 矩阵
+    M, K, N = 128, 64, 128
+    q = torch.randn((M, K), dtype=torch.float32, device='cuda')
+    k = torch.randn((K, N), dtype=torch.float32, device='cuda')
+    v = torch.randn((K, N), dtype=torch.float32, device='cuda')
+
+    # 缩放因子
+    scale = 1.0 / (K ** 0.5)
+
+    # 调用 scaled_dot_product_attention 函数
+    o = scaled_dot_product_attention(q, k, v, scale)
+
+    # # 打印结果
+    # print("Q:\n", q)
+    # print("K:\n", k)
+    # print("V:\n", v)
+    # print("Output:\n", o)
+```
+
+# DL Network
+
+## resnet
+
+```python
+import torch
+
+import triton
+import triton.language as tl
+
+@triton.jit
+def resnet_block_kernel(
+    x_ptr,        # 输入张量指针
+    w1_ptr,       # 第一个卷积核权重指针
+    w2_ptr,       # 第二个卷积核权重指针
+    out_ptr,      # 输出张量指针
+    M, N, K: tl.constexpr,      # 输入和输出的尺寸参数
+    BLOCK_SIZE_M: tl.constexpr,  # 行分块大小
+    BLOCK_SIZE_N: tl.constexpr   # 列分块大小
+):
+    # 当前线程块的起始索引
+    row_offsets = tl.arange(0, BLOCK_SIZE_M)
+    col_offsets = tl.arange(0, BLOCK_SIZE_N)
+
+    row_idx = tl.program_id(0) * BLOCK_SIZE_M + row_offsets
+    col_idx = tl.program_id(1) * BLOCK_SIZE_N + col_offsets
+
+    mask_row = row_idx < M
+    mask_col = col_idx < N
+
+    # 每个线程块加载一部分输入数据
+    x = tl.load(x_ptr + row_idx[:, None] * K + tl.arange(0, K), mask=mask_row[:, None], other=0.0)
+
+    # 第一次卷积
+    w1 = tl.load(w1_ptr + col_idx[None, :] * K + tl.arange(0, K)[:, None], mask=mask_col[None, :], other=0.0)
+    h1 = tl.dot(x, w1)
+
+    # ReLU 激活
+    h1_relu = tl.where(h1 > 0, h1, 0.0)
+
+    # 第二次卷积
+    w2 = tl.load(w2_ptr + col_idx[None, :] * K + tl.arange(0, K)[:, None], mask=mask_col[None, :], other=0.0)
+    h2 = tl.dot(h1_relu, w2)
+
+    # 残差连接
+    x_residual = tl.load(x_ptr + row_idx[:, None] * K + col_idx[None, :], mask=(mask_row[:, None] & mask_col[None, :]), other=0.0)
+    out = h2 + x_residual
+
+    # 写回输出
+    tl.store(out_ptr + row_idx[:, None] * N + col_idx[None, :], out, mask=(mask_row[:, None] & mask_col[None, :]))
+
+# 使用示例
+def resnet_block(x, w1, w2):
+    import torch
+
+    M, K = x.shape
+    K_w1, N = w1.shape
+    K_w2, N_w2 = w2.shape
+
+    assert K == K_w1 == K_w2, "输入与权重维度不匹配"
+    assert N == N_w2, "两次卷积输出维度必须一致"
+
+    output = torch.empty((M, N), dtype=torch.float32, device='cuda')
+
+    BLOCK_SIZE_M = 32
+    BLOCK_SIZE_N = 64
+    grid = ((M + BLOCK_SIZE_M - 1) // BLOCK_SIZE_M, (N + BLOCK_SIZE_N - 1) // BLOCK_SIZE_N)
+
+    resnet_block_kernel[
+        grid
+    ](
+        x, w1, w2, output, M, N, K, BLOCK_SIZE_M, BLOCK_SIZE_N
+    )
+
+    return output
+
+if __name__ == "__main__":
+    import torch
+
+    # 初始化输入和权重
+    M, K, N = 128, 64, 128  # 输入大小: MxK, 权重大小: KxN
+    x = torch.randn((M, K), dtype=torch.float32, device='cuda')
+    w1 = torch.randn((K, N), dtype=torch.float32, device='cuda')
+    w2 = torch.randn((K, N), dtype=torch.float32, device='cuda')
+
+    # 调用 ResNet 块函数
+    output = resnet_block(x, w1, w2)
+
+    # # 打印结果
+    # print("Input:\n", x)
+    # print("Weight1:\n", w1)
+    # print("Weight2:\n", w2)
+    # print("Output:\n", output)
+```
+
