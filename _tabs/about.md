@@ -8,7 +8,7 @@ order: 4
 About Me
 ====== -->
 
-I am a third-year graduate student at the [Institute of Computing Technology, Chinese Academy of Sciences](http://www.ict.ac.cn/), specializing in the [State Key Lab of Processors, SKLP](https://sklp.ict.ac.cn/) (Intelligent Processor Research Center). I am expected to graduate in 2025.
+I am a third-year graduate student at the [Institute of Computing Technology, Chinese Academy of Sciences](https://www.ict.ac.cn/), specializing in the [State Key Lab of Processors, SKLP](https://sklp.ict.ac.cn/) (Intelligent Processor Research Center). I am expected to graduate in 2025.
 
 My graduate research mainly focuses on "auto-schedule and auto-tuning" related to AI Compiler, and I have a strong interest in machine learning system.
 
