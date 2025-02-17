@@ -51,7 +51,7 @@ cmake --build . --target check-mlir
 - 如果是bazel编译
 
 在BUILD文件配置一下下面的内容，再bazel run 一下就可以编译出compile_commands.json
-详情自学：[https://github.com/hedronvision/bazel-compile-commands-extractor/tree/main](https://github.com/hedronvision/bazel-compile-commands-extractor/tree/main)
+详情自学：[bazel-compile-commands-extractor](https://github.com/hedronvision/bazel-compile-commands-extractor/tree/main)
 
 (1) 修改WORKSPACE，添加
 
@@ -80,6 +80,7 @@ refresh_compile_commands(
     # 指定目标 target 及其编译选项/参数，例如 `mlir-opt` 、`config=clangd`
     targets = {
       "//:my_output_1": "--important_flag1 --important_flag2=true"
+        # "//tools:triton-opt": "--config=debug --config=clang",
     },
 )
 ```
@@ -542,7 +543,9 @@ void getForwardSlice(Value root, SetVector<Operation *> *forwardSlice,
              9
 ```
 
-输入， root可以是op，也可以是value
+输入， root可以是op，也可以是value。
+
+如果是op，那么会追踪组成该op的其所有operand；如果是value，那么会追踪该value的产生链，使用value就可以从BlockArguement开始追。
 
 ```cpp
 void getBackwardSlice(Operation *op, SetVector<Operation *> *bac
@@ -1482,15 +1485,15 @@ for (auto operand : op.getOperands()) {
 IRMapping mapping;
 mapping().map(op1.getResults(), op2.getResults());
 for (auto &opOperand : op3.getOpOperands()) {
- // 将 op3 的参数里含有 op1 results 的替换为 op2 的
-  // lookupOrDefault 指找不到 mapping 就用原来的
+ // 将 op3 的参数里含有 op1 results 的替换为 op2 的 mapping
+  // mapping.lookupOrDefault(a): 如果mapping中存在就用结果，反之用 a
   opOperand.set(mapping.lookupOrDefault(opOperand.get()));
 }
 ```
 
 ## value找op
 
-- getDefiningOp：可能返回nul
+- getDefiningOp：可能返回null
 
 - getUses ：返回OpOperand迭代器，即使用了这个value的OpOperand集合
   - OpOperand &operand : value.getUses()
@@ -2460,6 +2463,8 @@ mlir/include/mlir/IR/IRMapping.h
 - map(Operation *from, Operation *to)
 
 2.lookupOrValue(from, value);
+
+mapping.lookupOrValue(from, value): mapping中找到就用from，找不到就用value
 
 - lookupOrDefault <=> lookupOrValue(from, from);
 
@@ -4588,7 +4593,7 @@ def passNamePass : Pass<"pass-flag">, "该pass的作用对象" > { // 作用域�
   ];
 ```
 
-2.Passed.h 中声明pass
+2.Passes.h 中声明pass
 
 include/xxx/Transforms/Passes.h
 
@@ -5724,6 +5729,16 @@ for (Range range : loopRanges) {
 - TypeValue
 
 TypeValue 继承自 Value，有静态已知的 Type(使用 getType()) 获取，避免了普通 value getType() 后还要进行 case。
+
+
+
+# ValueBound
+
+```cpp
+mlir/Interfaces/ValueBoundsOpInterface.h
+```
+
+常用来估算Value的某个index的LB和UB，每个Dialect需要自己实现这个Interface，会递归调用
 
 # Visitor
 
