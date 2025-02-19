@@ -110,6 +110,10 @@ tags: [Triton, Linalg]
 
 - triton-linalg: 指针会使用`llvm.inttoptr`  转为 `llvm.ptr` (和 `triton` [官方一致](https://github.com/triton-lang/triton/blob/main/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L792))-> 通过`AxisInfoAnalysis`计算出 `strides,shapes,offset`(实际是分析出访存的连续性)，使用 `aux.view` 将`llvm.ptr`转成数据实际存放的memref -> 通过 `bufferization.to_tensor` 转为tensor语义下的操作，再使用 `linalg.copy`(连续访存) 或 `linalg_ext.gather`(离散访存) 来获取数据
 
+> triton-shared 不再表达 `ptr` 语义，可以直接从 `memref` 直接得出 layout(shape, stride)，一定会有确定的 shape
+>
+> triton-linalg 虽然会将 `ptr` 用 `aux.view` 专为实际的 memref，如果分析不出连续性也是无穷大的 memref
+
 # 环境配置
 
 - clone
@@ -1389,7 +1393,7 @@ linalg_ext.gather_atomic_cas release ins(%input, %cmp, %val, %indice: tensor<?xi
 
 - linalg_ext.pad
 
-pad行为，构造时需要 ins, outs, pvalue(pad用的value), low(下界), high(上届)。
+pad行为，构造时需要 ins, outs, pvalue(pad用的value), low(下界), high(上界)。
 
 ```text
 %pad = linalg_ext.pad
@@ -1693,7 +1697,7 @@ mask─►tt.broadcast─►arith.cmpi─┤
 - parse lhs 拿到 tt.expand_dims 返回的 `Result`(`SimpleRange`)
 - parse rhs 拿到 tt.splat 返回的 `Failure`， 停止。
 
-如果不停止，会进入 `compareSimpleRange` 将 parse lhs 的 `Result`(`SimpleRange`) 和 parse rhs 的 `Result`(`Scalar`) 给结合起来，用于计算 mask 的新上届和下届。
+如果不停止，会进入 `compareSimpleRange` 将 parse lhs 的 `Result`(`SimpleRange`) 和 parse rhs 的 `Result`(`Scalar`) 给结合起来，用于计算 mask 的新上界和下界。
 
 (3) tt.expand_dims
 
