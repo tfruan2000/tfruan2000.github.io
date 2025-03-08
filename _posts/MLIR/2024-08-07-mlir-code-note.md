@@ -559,7 +559,7 @@ void getBackwardSlice(Value root, SetVector<Operation *> *backwa
 
 - TransitiveFilter filter : 设置遍历条件，当遍历到的节点不符合 filter 时停止(注意第一个遍历对象就是 rootOp)
 
-- bool inclusive : 返回的 sliceSetVec中 是否包含 rootOp
+- bool inclusive : 返回的 sliceSetVec中 是否包含 root(op / value)
 
 **ForwardSliceOptions** : using ForwardSliceOptions = SliceOptions;
 
@@ -578,7 +578,7 @@ sliceOptions.filter = [rootOp](Operation *slice) -> bool {
           && rootOp->isProperAncestor(slice);
 };
 
-SmallVector<Operation *> backwardSlice;
+SetVector<Operation *> backwardSlice;
 getBackwardSlice(targetOp, &backwardSlice, sliceOptions);
 ```
 
@@ -5760,7 +5760,7 @@ WalkResult ret = a.walk([&](Ty opOfTy) -> WalkResult {
 
 - `WalkResult` : Interrupt, Advance, Skip
 
-- `WalkOrder` : 可以设置 walk 的方向， `PreOrder` 或  `PostOrder`，不设置时默认 `PreOrder`
+- `WalkOrder` : walk 的次序， `PreOrder` 或  `PostOrder`，默认 `PreOrder` (region ->
 
 - `wasInterrupted()` ,  `wasSkipped()` 判断 walk 的结果(返回值)
 

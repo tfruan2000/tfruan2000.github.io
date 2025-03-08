@@ -139,7 +139,7 @@ conda install pytorch torchvision # 我也不确定需不需要，反正cpu的�
 由于我是在 macOS 上编译，所以直接通过 `brew` 安装了相关工具
 
 ```bash
-brew install cmake ninja-build ccache clang lld
+brew install cmake ccache clang lld
 conda install pytest-xdist cython # 记得要装cython
 ```
 

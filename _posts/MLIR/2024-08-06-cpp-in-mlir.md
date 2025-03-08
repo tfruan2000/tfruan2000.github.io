@@ -444,3 +444,23 @@ Operation *traceBackwardToDefineOp(OpBuilder &rewriter, Operation *defineOp,
       .Default([](Operation *otherOp) { return nullptr; });
 }
 ```
+
+
+```cpp
+template <typename OpTy,
+          std::enable_if_t<
+              llvm::is_one_of<OpTy, arith::AddIOp, arith::SubIOp,
+                              arith::MulIOp, arith::DivSIOp, arith::RemSIOp
+                              arith::AndIOp>::value,
+              bool> = true>
+LogicalResult visitBinaryOp(OpTy binaryOp, IndexInfo &info) {
+  if constexpr (std::is_same_v<OpTy, arith::AddIOp>) {
+  } else if constexpr (std::is_same_v<OpTy, arith::SubIOp>) {
+  } else if constexpr (std::is_same_v<OpTy, arith::MulIOp>) {
+  } else if constexpr (std::is_same_v<OpTy, arith::DivSIOp>) {
+  } else if constexpr (std::is_same_v<OpTy, arith::RemSIOp>) {
+  } else if constexpr (std::is_same_v<OpTy, arith::AndIOp>) {
+  }
+  return success();
+}
+```
