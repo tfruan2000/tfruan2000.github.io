@@ -106,11 +106,11 @@ string minWindow(string s, string t) {
     int tmp = l - 1;
     if (r - tmp + 1 < len) {
       len = r - tmp + 1;
-      record = tmp;
+      start = tmp;
     }
   }
   if (s.size() + 1 == len) return {};
-  return s.substr(record, len);
+  return s.substr(start, len);
 }
 ```
 
