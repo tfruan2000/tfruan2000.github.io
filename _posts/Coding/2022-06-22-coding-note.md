@@ -1005,9 +1005,9 @@ int dfs(int curr, int parent, vector<int> &an, unordered_map<int, unordered_map<
       max_path2 = subMax;
     }
     maxB += max_path1; // 从 curr 出发的最长
-    res = max(res, maxB + max_path2);
-    return maxB;
   }
+  res = max(res, maxB + max_path2);
+  return maxB;
 }
 
 int main() {

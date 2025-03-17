@@ -816,3 +816,12 @@ if __name__ == "__main__":
     # print("Output:\n", output)
 ```
 
+```pythhon
+# attn(Q, K, V) = softmax(Q, K) * V
+# scalar = 1 / tl.sqrt(K)
+# logical = dot(Q, K)
+# max_logical = tl.max(logical, axis = 1)
+# logical_exp = tl.exp(logical - max_logicals[:, None])
+#softmax = logical_exp / tl.sum(logical_exp, axis=1)[:, None]
+# out += tl.dot(softmax, v)
+```
