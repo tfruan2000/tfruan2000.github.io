@@ -341,6 +341,7 @@ std::unique_ptr<mlir::DataFlowSolver> createDataFlowSolver() {
   auto solver = std::make_unique<mlir::DataFlowSolver>();
   solver->load<mlir::dataflow::DeadCodeAnalysis>();
   solver->load<mlir::dataflow::SparseConstantPropagation>();
+  solver->load<mlir::dataflow::IntegerRangeAnalysis>();
   ...
   return solver;
 }
@@ -401,6 +402,11 @@ LogicalResult DataFlowSolver::initializeAndRun(Operation *top) {
 auto analysisState = solver->lookupState<xxLattice>(Value/Op)
 // 当不存在时, getOrCreateState 会创建一个未初始化的 state
 auto analysisState = solver->getOrCreateState<xxLattice>(Value/Op)
+
+auto *maybeInferredRange =
+    solver.lookupState<IntegerValueRangeLattice>(val);
+if (!maybeInferredRange || maybeInferredRange->getValue().isUninitialized())
+  return failure();
 ```
 
 (4) 其他：重要的数据成员
@@ -1401,19 +1407,9 @@ mlir/Conversion/LLVMCommon/TypeConverter.h
 
 对type对改写一般通过 `typeConverter` ，常配合 `ConversionTarget` 使用。其一般包含三个主要函数
 
-- `addConversion` ：定义type转换规则
-
-例如
-
-```cpp
-typeConverter converter;
-converter.addConversion([&]ToyIntegerType t) -> std::optional<Integer> {
- return Integer::get(&getContext(), t.getWidth())
-}
-```
-
 - `addConversion` ：定义通用的类型转换规则，当调用 `convertType` 方法时，会依次检查 `addConversion` 中注册的规则。
   - 当调用 `getTypeConverter()->convertType(inputType)` 时启用
+
 - `addTargetMaterialization` ：sourceType→targetType
   - 例如，op2 以 op1 作为 operand，当 op1 和 op2 的 resType 被转换后， op2 期望其 operandType 和 op1 给出的并不符合，所以就需要将中间类型值转换为目标类型值。
 - `addSourceMaterialization` ：targetType→sourceType
@@ -1434,17 +1430,26 @@ public:
         return ...;
       return type;
     });
+
+    addTargetMaterialization([](OpBuilder &builder, Type type, ValueRange values) {
+      if (...)
+        return builder.create<SomeOp>(type, values);
+      return nullptr;
+    });
+    addSourceMaterialization(materializeToXXXCallback);
+    addArgumentMaterialization(materializeToXXXCallback);
+
+    // 可以默认使用 unrealized_conversion_cast，如下
+    auto addUnrealizedCast = [](OpBuilder &builder, Type type, ValueRange inputs,
+                                Location loc) {
+      auto cast = builder.create<UnrealizedConversionCastOp>(loc, type, inputs);
+      return std::optional<Value>(cast.getResult(0));
+    }
+    addSourceMaterialization(addUnrealizedCast);
+    addTargetMaterialization(addUnrealizedCast);
+    addArgumentMaterialization(addUnrealizedCast);
   }
-
-  addTargetMaterialization([](OpBuilder &builder, Type type, ValueRange values) {
-    if (...)
-      return builder.create<SomeOp>(type, values);
-    return nullptr;
-  });
-
-  addSourceMaterialization(materializeToXXXCallback);
-  addArgumentMaterialization(materializeToXXXCallback);
-}
+};
 ```
 
 ---
@@ -2189,11 +2194,17 @@ MemRefType 主要由 layout 描述: offset, size, stride, memrefspace
 
 ```cpp
 auto strided = dyn_cast<MemRefLayoutAttrInterface>(t.getLayout());
-ArrayRef<int64_t> strides = strided.getStrides();
-int64_t offset = strides.getOffset();
 ```
 
 - getMemorySpace() → Attribute
+- MemRefType::get() 提供了多种构造的方法
+
+```cpp
+// 如果只有 shape 和 elemTy 两个属性，但想构造一个包含 memory space 的 memref，那么可以额外使用 Builder
+MemRefType resTy =
+    MemRefType::get(dstType.getShape(), dstType.getElementType());
+resTy = MemRefType::Builder(resTy).setMemorySpace(srcTy.getMemorySpace());
+```
 
 ### offset / stride / size
 
@@ -2490,6 +2501,7 @@ Op 相关的 Interface (例如 `DestinationStyleOpInterface`)其实就是一个 
 
 - ElementsAttrInterface
   - DenseIntOrFPElements
+    - DenseIntElementsAttr: `mlir::DenseIntElementsAttr::get(\*ShapedType*\ shaped, \APInt\ val);`
   - DenseStringElements
   - DenseResourceElements
   - SparseElements
@@ -3756,6 +3768,80 @@ llvm/include/llvm/ADT/SetOperations.h
 - llvm::set_union(A, B): 计算集合A与集合B的并集，并将结果赋值给集合A
 - llvm::set_intersection(A, B): 计算集合A与集合B的交集，并将结果赋值给集合A
 - llvm::set_subtract(A, B): 计算集合A与集合B的差集（在A中但不在B中），并将结果赋值给集合A
+
+---
+
+# LLVM Dialect
+
+```bash
+mlir/include/mlir/Target/LLVMIR
+mlir/lib/Target/LLVMIR
+```
+
+LLVM Dialect 是 mlir 设置的最后一个出口， 和 LLVM IR 映射密切，提供了许多公共的 api，某些 arch special 的信息需要同时定义一个同级的 Dialect 来辅助下降，例如 NVVM Dialect
+
+下面以一段 gpu dialect 表示的内容进行下降说明
+
+```text
+module attributes {gpu.container_module} {
+  gpu.module @copy {
+    gpu.func @copy(%arg0: memref<1024xf32>, %arg1: memref<1024xf32>) kernel {
+      %thread = gpu.thread_id x
+      %idx = affine.apply affine_map<()[s0] -> (s0 * 4)>()[%thread]
+      %v = vector.load %arg0[%idx] : memref<1024xf32>, vector<4xf32>
+      vector.store %v, %arg1[%idx] : memref<1024xf32>, vector<4xf32>
+      gpu.return
+    }
+  }
+}
+```
+
+to llvm dialect: 由于没有 gpu arch，得用点骚办法 `mlir-opt -gpu-lower-to-nvvm-pipeline --mlir-print-ir-after-all` 把最后的 llvm dialect 表示抠出来，如下
+
+```text
+llvm.func @copy(%arg0: !llvm.ptr, %arg1: !llvm.ptr, %arg2: i64, %arg3: i64, %arg4: i64, %arg5: !llvm.ptr, %arg6: !llvm.ptr, %arg7: i64, %arg8: i64, %arg9: i64) attributes {gpu.kernel, nvvm.kernel} {
+  %0 = llvm.mlir.constant(4 : index) : i64
+  %1 = nvvm.read.ptx.sreg.tid.x : i32
+  %2 = llvm.sext %1 : i32 to i64
+  %3 = llvm.mul %2, %0 overflow<nsw> : i64
+  %4 = llvm.getelementptr %arg1[%3] : (!llvm.ptr, i64) -> !llvm.ptr, f32
+  %5 = llvm.load %4 {alignment = 4 : i64} : !llvm.ptr -> vector<4xf32>
+  %6 = llvm.getelementptr %arg6[%3] : (!llvm.ptr, i64) -> !llvm.ptr, f32
+  llvm.store %5, %6 {alignment = 4 : i64} : vector<4xf32>, !llvm.ptr
+  llvm.return
+}
+```
+
+to llvm ir: `mlir-translate  --mlir-to-llvmir tmp.mlir`
+
+```text
+; ModuleID = 'LLVMDialectModule'
+source_filename = "LLVMDialectModule"
+
+define ptx_kernel void @copy(ptr %0, ptr %1, i64 %2, i64 %3, i64 %4, ptr %5, ptr %6, i64 %7, i64 %8, i64 %9) {
+  %11 = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+  %12 = sext i32 %11 to i64
+  %13 = mul nsw i64 %12, 4
+  %14 = getelementptr float, ptr %1, i64 %13
+  %15 = load <4 x float>, ptr %14, align 4
+  %16 = getelementptr float, ptr %6, i64 %13
+  store <4 x float> %15, ptr %16, align 4
+  ret void
+}
+
+; Function Attrs: nocallback nofree nosync nounwind speculatable willreturn memory(none)
+declare noundef i32 @llvm.nvvm.read.ptx.sreg.tid.x() #0
+
+attributes #0 = { nocallback nofree nosync nounwind speculatable willreturn memory(none) }
+
+!llvm.module.flags = !{!0}
+
+!0 = !{i32 2, !"Debug Info Version", i32 3}
+```
+
+后续专为 ptx，用 `llc -march=nvptx64 -mcpu=sm_XX output.ll -o output.ptx` 即可
+
+参考 `llvm/test/CodeGen/NVPTX/load-store-vectors.ll` 中的测试
 
 ---
 
@@ -5760,7 +5846,7 @@ WalkResult ret = a.walk([&](Ty opOfTy) -> WalkResult {
 
 - `WalkResult` : Interrupt, Advance, Skip
 
-- `WalkOrder` : walk 的次序， `PreOrder` 或  `PostOrder`，默认 `PreOrder` (region ->
+- `WalkOrder` : walk 的次序， `PreOrder` 或  `PostOrder`，默认 `PreOrder` (region -> block -> op，即先op本身再内部)
 
 - `wasInterrupted()` ,  `wasSkipped()` 判断 walk 的结果(返回值)
 

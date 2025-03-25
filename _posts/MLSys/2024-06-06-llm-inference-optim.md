@@ -58,12 +58,13 @@ kvcache只适用于decoder self-attention结构，因为decoder结构有casual_m
 
 ![cache](/assets/img/blog/img_llm_inference_optim/cache.png)
 
-- 传统注意力计算时，需要将当前时刻的 `Q` 去乘以过去所有时刻的 `K`，如果没有KV Cache，每一次就需要重新计算KV。
-- 使用kv cache后，就不需要重新计算之前的KV Cache。
+- 传统注意力计算时，需要将当前时刻的 `Q` 去乘以过去所有时刻的 `K`，如果没有KV Cache，每一次就需要重新计算KV(通过输入和权重矩阵计算)。
+- 每一轮计算只依赖于当前的 Q_i，以及之前所有时刻的 K、V，使用kv cache后，就不需要重新计算之前的KV
+- Q Cache：从单request来讲是不需要Q cache的，但从整体系统而言，分析每次 request 的 Q 相关性（例如问一样的问题），也是对系统有意义的。
 
 GEMM 降级到 GEMV 后，还想继续用上 tensor core，可以增加计算的并行，将运算拼接成一个GEMM。
 
-window attn：每个token只和包含本身在内的前n个token做attn（使用前几次decode的kvcache），这样kvcache就可以只存一个window的个数。更早的token信息可以跨层流动，就像cnn中的感受野（输出只跟一些输入有关）
+window attn(sliding windows)：每个token只和包含本身在内的前n个token做attn（使用前几次decode的kvcache），这样kvcache就可以只存一个window的个数。更早的token信息可以跨层流动，就像cnn中的感受野（输出只跟一些输入有关）
 
 > window attn 是在 Mixtral 中提出的，Mixtral 中Rotary的意思就是：通过某种规则，将Cache中的数据旋转回正确的位置，以便能正确做Attention。因为cache每次都在更新，重新写入，所顺序是不符合期望的。
 
@@ -97,9 +98,11 @@ pretrain 可以理解为积累专业知识， SFT 可以理解学会执行特定
 
 (3) 进行 SFT(Supervised Fine-Tuning)，让其在特定任务中表现得更好
 
-(4) 训练 RM(Reward Modeling)，来评估生成内容的质量
+(4) 训练 RM(Reward Modeling)，来评估生成内容的质量，去除得分低的
 
-(5) 评估、验证、部署、监控
+(5) RLHF使用强化学习结合人类反馈，调整模型以生成更符合需求的输出。
+
+(6) 评估、验证、部署、监控
 
 ## 推理概念
 
@@ -131,10 +134,25 @@ pretrain 可以理解为积累专业知识， SFT 可以理解学会执行特定
   - 技术：量化、静态批处理(等待到一定量的请求后一起发出，等所有的请求都完成后才释放硬件资源)
   - TensorRT-LLM
 
-4.CPP
+4.投机采样(Speculative Decoding)
 
-CPP(Circal Pipeline Parallel) 是PP的一种，通过引入“循环”机制，使得数据在流水线中循环流动。
-允许new batch在old batch计算完成之前进入流水线。
+(1)用小模型做自回归连续采样生成n个token
+
+(2)将生成的n个token和前缀拼接在一起，送入大模型执行一次前向
+
+(3)根据结果判断是接受小模型的结果还是重新进行(1)
+
+计算量是不变的，但大模型内n个会同时参与计算，计算访存比显著提升
+
+5.Parallelism
+
+- DP: 一般在batch维度拆分，将独立的数据拆开
+- TP: 将weight和activation拆分到不同的设备
+- PP: 拆出mini-batch，每个设备负责一部分
+  - 1F1B（最后一个设备算完1F后就算1B，减少activation所占显存）， 1F1B Interleaved
+  - CPP(Circal Pipeline Parallel) 是PP的一种，通过引入“循环”机制，使得数据在流水线中循环流动。允许new batch在old batch计算完成之前进入流水线。
+- SP: 切分Sequence，序列指的是具有时间或顺序关系的数据，例如文本中的单词序列、时间序列数据
+  - 当sequence被分到不同devie上，需要让一定的通信来传递顺序信息（attention需要关注到前一段seq的最后一个token）
 
 ## 分布式
 
