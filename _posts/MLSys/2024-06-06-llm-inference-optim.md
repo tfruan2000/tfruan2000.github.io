@@ -146,13 +146,14 @@ pretrain 可以理解为积累专业知识， SFT 可以理解学会执行特定
 
 5.Parallelism
 
-- DP: 一般在batch维度拆分，将独立的数据拆开
-- TP: 将weight和activation拆分到不同的设备
+- DP: 一般在batch维度（独立的样本数据）拆分，将独立的数据拆开
+- TP: 将weight拆分到不同的设备，在不同设备上计算一部分activation，再通过通信原语给合并起来
 - PP: 拆出mini-batch，每个设备负责一部分
   - 1F1B（最后一个设备算完1F后就算1B，减少activation所占显存）， 1F1B Interleaved
   - CPP(Circal Pipeline Parallel) 是PP的一种，通过引入“循环”机制，使得数据在流水线中循环流动。允许new batch在old batch计算完成之前进入流水线。
 - SP: 切分Sequence，序列指的是具有时间或顺序关系的数据，例如文本中的单词序列、时间序列数据
   - 当sequence被分到不同devie上，需要让一定的通信来传递顺序信息（attention需要关注到前一段seq的最后一个token）
+- CPP: Chunk Prefill Pipeline
 
 ## 分布式
 

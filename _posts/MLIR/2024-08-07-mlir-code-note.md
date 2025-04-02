@@ -2694,7 +2694,7 @@ if (auto memEffect = llvm::dyn_cast<MemoryEffectOpInterface>(op)) {
   - NoMemoryEffect
   - HasRecursiveMemoryEffects 且 所有 nested ops 都是 MemoryEffectFree
 
-- hasEffect(Operation *op, Value value = nullptr) : 判断op是否对value有副作用，如果没提供value，则判断op是否有副作用
+- hasEffect<EffectTys>(Operation *op, Value value = nullptr) : 判断op是否对value有副作用，如果没提供value，则判断op是否有副作用
 
 ```cpp
 template <typename... EffectTys>
@@ -4650,6 +4650,26 @@ LogicalResult XXXX::runLoop(Module module) {
 
 # Pass
 
+## 优雅Pass守则
+
+In Short:
+
+- 必须**不依赖于当前target的相邻op状态**，因为其相邻op可能在多线程的过程中被修改
+  - 根据当前target的ancestor/parent是可以的
+- 不能修改超出当前target作用域的东西（可以理解为顶多只能修改当前target所附带region的部分）
+- op上的attr的修改是安全的
+- 不能维护全局信息，例如pass之间不能维护一个变量用来传递信息
+  - 使用attr是可以的
+  - analysis中也有提供 `markAnalysesPreserved` 接口
+
+
+详见：
+
+```
+mlir/docs/PassManagement.md
+```
+
+
 ## 写一个 pass
 
 1.Passes.td中定义pass的基本信息（描述、作用对象）
@@ -5667,6 +5687,7 @@ Value 必然包含 Type，Type 也可以作为 Attribute 附加在 Operation 上
 
 - ShapedType::kDynamic 用于判断某个数不是 `?`
 - isDynamicDim(i)
+- getNumElements(ArrayRef<int64_t> shape) 获得给定 shape 所表示的元素个数
 - 当Type满足 `!llvm::isa<BaseMemRefType, TensorType>(type)` 时，认为该type是个scalar
 
 2.TensorType
