@@ -3390,7 +3390,7 @@ for (const auto &[operand, arg] :
 
 7.llvm::is_contained
 
-判断 Element 是否在 Range 中，比用 `llvm::find` 更简洁。
+判断 Element 是否在 Range 中，比用 `llvm::find` 更简洁（底层实现也是find判断有没有到container::end）。
 
 ```cpp
 bool is_contained(R &&Range, const E &Element)
@@ -5728,6 +5728,7 @@ Value 必然包含 Type，Type 也可以作为 Attribute 附加在 Operation 上
   ```
 
 - getStridesAndOffset(MemRefType t, SmallVectorImpl<int64_t> **&**strides, int64_t **&**offset)
+  - 对于 identity layout，也能拿到 strides 和 offset
 - canonicalizeStridedLayout(MemRefType t) -> MemRefType : 标准化t的layout格式，如果能canonicalize成静态的就没问题，否则返回MemRefType的layout将是affineMap的形式
 
 例： bufferize时创建memref
