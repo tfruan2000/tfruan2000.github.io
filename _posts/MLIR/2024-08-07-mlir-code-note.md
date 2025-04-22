@@ -815,7 +815,7 @@ auto mapOp = rewriter.create<linalg::MapOp>(
     loc, ValueRange(op.getDpsInputs()), emptyOp,
     [&](OpBuilder &b, Location loc, ValueRange args) {});
 
-// 下面的代码等价于 rewriter.inlineRegionBefore(op->getRegion(0), mapOp->getRegion(0), mapOp->getRegion(0)->begion());
+// 下面的代码等价于 rewriter.inlineRegionBefore(op->getRegion(0), mapOp->getRegion(0), mapOp->getRegion(0)->begin());
 
 Block *opBody = op.getBody();
 llvm::SmallVector<Value> bbArgs;
@@ -1096,7 +1096,7 @@ getBlock()
 
   ```cpp
   // 替换forallOp外的使用
-  rewriter.replaceAllUsesWithIf(workOp->getResult(0), forallOp->getResults(idx),
+  rewriter.replaceUsesWithIf(workOp->getResult(0), forallOp->getResults(idx),
     [&](OpOperand use) {return !forallOp->isProperAncestor(use.getOwner())
   // 仅替换当前op的使用
   rewriter.replaceUsesWithIf(emptyOp->getResult(), newEmptyOp->getResult(),
@@ -1243,6 +1243,60 @@ func.func @matmul(%arg0: memref<12x9xf32, strided<[?, ?], offset: ?>>, %arg1: me
   return %arg2 : memref<12x6xf32, strided<[?, ?], offset: ?>>
 }
 ```
+
+---
+
+# Canonicalize
+
+每个 op 自己注册，需要在 `td` 中加上 `let hasCanonicalizer = 1;`， 然后在对应的 cpp 中添加相关方法，例如：
+
+```cpp
+namespace {
+struct FoldAdjacentBitcast : public OpRewritePattern<BitcastOp> {
+  using OpRewritePattern<BitcastOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(BitcastOp op,
+                                PatternRewriter &rewriter) const override {
+    if (auto parentOp = op.getSrc().getDefiningOp<BitcastOp>()) {
+      // The adjacent bitcast must have only use.
+      if (parentOp->hasOneUse()) {
+        auto src = parentOp.getSrc();
+        RankedTensorType dstTy = op.getDest().getType();
+        auto newBitcast =
+            rewriter.createOrFold<BitcastOp>(op.getLoc(), dstTy, src);
+        rewriter.replaceOp(op, newBitcast);
+        return success();
+      }
+    }
+    return failure();
+  }
+};
+} // namespace
+
+void BitcastOp::getCanonicalizationPatterns(RewritePatternSet &results,
+                                            MLIRContext *context) {
+  results.add<FoldAdjacentBitcast>(context);
+}
+```
+
+这些 `CanonicalizationPatterns` 会在调用 `Canonicalizer` pass 时被调用。
+
+此外，类似的还有 fold 方法，同样需要在 `td` 中添加 `let hasFolder = 1;`
+
+```cpp
+OpFoldResult BitcastOp::fold(FoldAdaptor) {
+  if (getSrc().getType() == getDest().getType()) {
+    return getSrc();
+  }
+  return {};
+}
+```
+
+fold 和 canonicalize 的区别：
+
+- fold 方法一般只跟 op 本身相关，且是一定会带来收益
+- canonicalize 方法一般需要分析 op 连接关系，且主要目标是简化后序分析，而非带来收益
+- PassManager 在运行时会先尝试调用 op 的 fold 方法，而 canonicalize 方法需要显式调用 canonicalize
 
 ---
 
@@ -2215,6 +2269,8 @@ resTy = MemRefType::Builder(resTy).setMemorySpace(srcTy.getMemorySpace());
 类似：[[mlir][memref] Introduce memref.offset and memref.stride ops](https://reviews.llvm.org/D130849)
 
 2.getStridesAndOffset
+
+注意：现在变成 MemRefType.getStridesAndOffset()
 
 ```cpp
 // mlir/lib/IR/BuiltinTypes.cpp
@@ -3639,6 +3695,33 @@ auto res = llvm::map_range(srcDims, [&](int64_t dim) { return dim * 2; });
   for (Block *block : llvm::make_early_inc_range(blockVec)) {
     ... // earse/replace ops in block
   }
+```
+
+注意在遍历 `getUsers()` 或 `getUses()` ，且要修改时，要么用 `SmallVector` 包起来，要么用 `make_early_inc_range`，即
+
+```cpp
+    for (OpOperand &currUse : llvm::make_early_inc_range(op->getUses())) {
+      auto newOp = rewriter.create<...>(...)
+      rewriter.replaceUsesWithIf(
+          op.getResult(), newOp.getResult(),
+          [&](OpOperand &use) { return use == currUse; });
+    }
+```
+
+因为 `getUsers()` 或 `getUses()` 返回的数据类型是 `use_range` 或 `user_range`，这些都是 `iterator_range` !!
+
+```cpp
+  // uses
+  using use_range = result_range::use_range;
+  // using use_range = iterator_range<use_iterator>;
+  use_range getUses() { return getResults().getUses(); }
+
+  // users
+  using user_iterator = ValueUserIterator<use_iterator, OpOperand>;
+  using user_range = iterator_range<user_iterator>;
+  user_iterator user_begin() { return user_iterator(use_begin()); }
+  user_iterator user_end() { return user_iterator(use_end()); }
+  user_range getUsers() { return {user_begin(), user_end()}; }
 ```
 
 ## find
