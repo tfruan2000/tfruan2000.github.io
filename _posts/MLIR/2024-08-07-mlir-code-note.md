@@ -3926,6 +3926,14 @@ attributes #0 = { nocallback nofree nosync nounwind speculatable willreturn memo
 
 参考 `llvm/test/CodeGen/NVPTX/load-store-vectors.ll` 中的测试
 
+一般 MLIR-LLVM CodeGen 的 pipeline:
+
+mix mlir dialect -> llvm dialect -> llvm ir -> hardware intrinsics(llvm/include/llvm/IR/Intrinsics.td) -> hardware assembly
+
+> intrinsic 其实是 LLVM 中一些根据硬件后端预定义的 vairable 和 function。
+
+mix mlir dialect -> llvm(+nvvm) dialect -> llvm ir -> ptx assembly -> 通过cuda-rt binary 转为 sass ，而不用转为 intrinsics
+
 ---
 
 # Matcher
@@ -5954,16 +5962,6 @@ WalkResult ret = a.walk([&](Ty opOfTy) -> WalkResult {
 - `WalkOrder` : walk 的次序， `PreOrder` 或  `PostOrder`，默认 `PreOrder` (region -> block -> op，即先op本身再内部)
 
 - `wasInterrupted()` ,  `wasSkipped()` 判断 walk 的结果(返回值)
-
----
-
-# MLIR CodeGen
-
-mix mlir dialect -> llvm dialect -> llvm ir -> hardware intrinsics -> hardware assembly
-
-> intrinsic 其实是 LLVM 中一些根据硬件后端预定义的 vairable 和 function。
-
-mix mlir dialect -> llvm dialect -> llvm ir -> ptx assembly -> 通过cuda-rt binary 转为 sass ，而不用转为 intrinsics
 
 ---
 

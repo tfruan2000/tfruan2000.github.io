@@ -150,6 +150,11 @@ pretrain 可以理解为积累专业知识， SFT 可以理解学会执行特定
     * FlashAttention: batch、head 维度并行，依赖高并发使得 btach 足够大
     * FlashDecoding: sequence维度并行，需要将 kv Cache 划分成 chunk，分开计算，然后再 chunk-wise reduce。减小内存开销
 
+融合式和分离式：prefill 和 decode 一起做害死 prefill 和 decode 分离
+
+* 融合式策略：由于 prefill 和 decode 相互干扰，优先级难以确定，难以同时满足所有需求的 TTFT 和 TPOT 需求
+* 分离式策略：Prefill实例做完后将kvcache传输到Decode实例上，额外的存储开销和通信开销。prefill 实例上的存储相比 decode 实例的压力要小很多
+
 ## compute bound / compute bound
 
 | 任务类型 |     compute bound     |       memory bound       |
