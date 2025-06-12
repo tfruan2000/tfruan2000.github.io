@@ -587,7 +587,7 @@ def bmm(a, b, activation=""):
     assert a.shape[2] == b.shape[1], "Incompatible dimensions"
     assert a.is_contiguous(), "Matrix A must be contiguous"
     B, M, K = a.shape
-    B, K, M = b.shape
+    B, K, N = b.shape
     c = torch.empty((B, M, N), device=a.device, dtype=torch.float16)
     # 2D launch kernel
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']), B,)

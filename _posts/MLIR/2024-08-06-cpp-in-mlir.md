@@ -445,6 +445,7 @@ Operation *traceBackwardToDefineOp(OpBuilder &rewriter, Operation *defineOp,
 }
 ```
 
+`std::enable_if_t<Condition, Type>` 用于模版编程中的条件编译，作用为根据特定条件启用或禁用这个函数模版。当 Condition 为 true 时，它会被替换为 Type；当 Condition 为 false 时，这个函数模板会被从重载集中移除。
 
 ```cpp
 template <typename OpTy,

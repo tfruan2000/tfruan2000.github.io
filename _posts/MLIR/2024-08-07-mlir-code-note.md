@@ -46,7 +46,7 @@ cmake --build . -- ${MAKEFLAGS}
 cmake --build . --target check-mlir
 ```
 
-生成的 `compile_commands.json` 在 `build` 目录下，复制到llvm-project目录即可
+生成的 `compile_commands.json` 在 `build` 目录下
 
 - 如果是bazel编译
 
@@ -89,13 +89,27 @@ refresh_compile_commands(
 
 2.然后，配置vscode的clangd插件
 
-`ctrl + p` 输入 clangd，先点击 下载language server；然后 加 settings.json , `ctrl + p` 打开工作区设置json，将以下内入加入
+（1）`ctrl + p` 输入 clangd，先点击 下载language server；
+
+如果 clangd 下载失败，那么手动安装：下载链接：https://github.com/clangd/clangd/releases/tag/19.1.2
+
+scp到服务器上的挂载目录
+
+```bash
+scp Downloads/clangd-linux-19.1.2.zip ruantingfeng@xxx:/home/ruantingfeng/projects
+```
+
+在docker unzip它，然后更换 "设置->Clangd:Path" 成对应的clangd二进制 `clangd  -> /projects/clangd/bin/clangd`。然后 reload windows
+
+（2）然后 加 settings.json , `ctrl + p` 打开工作区设置json，将以下内入加入
+
+> triton 默认的位置在 python/build/cmake.linux-x86_64-cpython-3.9/
 
 ```cpp
 {
     "clangd.arguments": [
         "--header-insertion=never",
-        "--compile-commands-dir=${workspaceFolder}/",
+        "--compile-commands-dir=${workspaceFolder}/build/",
         "--query-driver=**",
     ]
 }
@@ -1248,7 +1262,10 @@ func.func @matmul(%arg0: memref<12x9xf32, strided<[?, ?], offset: ?>>, %arg1: me
 
 # Canonicalize
 
-每个 op 自己注册，需要在 `td` 中加上 `let hasCanonicalizer = 1;`， 然后在对应的 cpp 中添加相关方法，例如：
+Canonicalize 的形式是进行 IR 的等价变换，目的是让 compiler 更方便分析（使 DAG 中的节点和连接减少），而不是为了性能考虑。
+例如某些情况下 x + x 可能比 x * 2 性能更好，但 x * 2 在 DAG 中表现的 Deps 关系更加清晰简单。
+
+有需要的 op 自己注册，需要在 `td` 中加上 `let hasCanonicalizer = 1;`， 然后在对应的 cpp 中添加相关方法，例如：
 
 ```cpp
 namespace {
@@ -1279,7 +1296,7 @@ void BitcastOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 ```
 
-这些 `CanonicalizationPatterns` 会在调用 `Canonicalizer` pass 时被调用。
+在 `Canonicalizer` pass 执行时，会贪心（greedy apply，一般是达到最大iter次数）地调用所有 loaded dialects 中 op 的  `CanonicalizationPatterns`
 
 此外，类似的还有 fold 方法，同样需要在 `td` 中添加 `let hasFolder = 1;`
 
@@ -1297,6 +1314,26 @@ fold 和 canonicalize 的区别：
 - fold 方法一般只跟 op 本身相关，且是一定会带来收益
 - canonicalize 方法一般需要分析 op 连接关系，且主要目标是简化后序分析，而非带来收益
 - PassManager 在运行时会先尝试调用 op 的 fold 方法，而 canonicalize 方法需要显式调用 canonicalize
+
+---
+
+# CRTP
+
+CRTP (Curiously Recurring Template Pattern，奇异递归模版模式)，在 MLIR 的类型定义中十分常见。
+
+```cpp
+class DialectFoldInterface
+    : public DialectInterface::Base<DialectFoldInterface>
+```
+
+表现形式为：将派生类（DialectFoldInterface）传给基类（DialectInterface）
+
+作用：为基类提供一些派生类信息，再通过基类中实现方法继承来扩展派生类本身。
+这种方法区别于虚函数继承，可以避免运行时虚函数表为了动态分派而进行查找的开销，实现静态多态（零运行时开销）
+
+推荐一个博客：[C++ CRTP 简介](https://xr1s.me/2022/10/18/brief-introduction-to-crtp/)
+
+其他 CPP in MLIR 相关内容见：https://tfruan2000.github.io/posts/cpp-in-mlir/
 
 ---
 
@@ -3244,6 +3281,13 @@ struct ...
 // mlir/include/mlir/Dialect/SPIRV/IR/SPIRVControlFlowOps.td
 def SPIRV_FunctionCallOp : SPIRV_Op<"FunctionCall", [
     InFunctionScope, DeclareOpInterfaceMethods<CallOpInterface>]> {
+```
+
+从 `callOp` 找 `funcOp`
+
+```cpp
+ModuleOp m = getOperation();
+triton::FuncOp matrixFunc = m.lookupSymbol<triton::FuncOp>(callOp.getCallee());
 ```
 
 ---

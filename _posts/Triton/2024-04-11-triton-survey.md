@@ -636,6 +636,10 @@ dumps the IR before every MLIR pass Triton runs
 
 打印每次 tuning 中的最优 tuning config 和 耗时。
 
+- `TRITON_DISABLE_LINE_INFO=1`
+
+关闭 dump ir 中的 loc info
+
 ## 打印pass前后ir
 
 - 使用 `triton-opt` 直接跑 pipeline，加上 `mlir-print-ir-after-all`
@@ -1127,3 +1131,5 @@ def triton_poi_fused_add_0(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.const
 注册 Inductor 最简单的方式 `compile` 接口的 backend 直接指定一个 triton-lang 写好的 kernel。
 
 > dynamo到triton的桥梁，dynamo：通过eager模式生成一个图，inductor是把dynamo生成的graph变成kernel组合
+
+`torch.compile` 后本质还是 eager 模式，只是通过 Inductor 将用户部分代码进行等价替换
