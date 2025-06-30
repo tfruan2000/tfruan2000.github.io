@@ -5987,14 +5987,14 @@ mlir/Interfaces/ValueBoundsOpInterface.h
 
 ```bash
 mlir/include/mlir/IR/Visitors.h
-mlir/bin/IR/Visitors.cpp
+mlir/lib/IR/Visitors.cpp
 ```
 
 用法
 
 ```cpp
 Operation a;
-WalkResult ret = a.walk([&](Ty opOfTy) -> WalkResult {
+WalkResult ret = a.walk<WalkOrder::PreOrder>([&](Ty opOfTy) -> WalkResult {
   ...
 });
 ```
@@ -6003,7 +6003,25 @@ WalkResult ret = a.walk([&](Ty opOfTy) -> WalkResult {
 
 - `WalkResult` : Interrupt, Advance, Skip
 
-- `WalkOrder` : walk 的次序， `PreOrder` 或  `PostOrder`，默认 `PreOrder` (region -> block -> op，即先op本身再内部)
+- `WalkOrder` : walk 的次序， `PreOrder` 或  `PostOrder`，默认 `PostOrder` (region -> block -> op，即先内部最后op本身)
+
+```cpp
+    ModuleOp m = getOperation();
+    // 本身 (moduleOp)先 dump，自外而内
+    m->walk<WalkOrder::PreOrder>([&](Operation *op) {
+      op->dump();
+    });
+
+    // nestedOp 先 dump，最后是本身 (moduleOp)，自内而外
+    m->walk<WalkOrder::PostOrder>([&](Operation *op) {
+      op->dump();
+    });
+
+    // 默认 walkorder是PostOrder
+    m->walk([&](Operation *op) {
+      op->dump();
+    });
+```
 
 - `wasInterrupted()` ,  `wasSkipped()` 判断 walk 的结果(返回值)
 
