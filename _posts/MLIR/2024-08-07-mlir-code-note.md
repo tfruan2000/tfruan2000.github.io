@@ -3750,6 +3750,16 @@ auto res = llvm::map_range(srcDims, [&](int64_t dim) { return dim * 2; });
           op.getResult(), newOp.getResult(),
           [&](OpOperand &use) { return use == currUse; });
     }
+
+
+    if (llvm::any_of(llvm::to_vector(src->getUsers()), [&](auto user) {
+          if (hasEffect<MemoryEffects::Write>(user, src)) {
+            return !dom.dominates(user, copyOp);
+          }
+          return false;
+        })) {
+      continue;
+    }
 ```
 
 因为 `getUsers()` 或 `getUses()` 返回的数据类型是 `use_range` 或 `user_range`，这些都是 `iterator_range` !!
@@ -6130,7 +6140,7 @@ for(int64_t i = 0; i < static_cast<int_64>(a.size()); ++i) {
     if (visitedIndexesSet.contains(i)) {
         ...
 
-// sort后顺序访问
+// sort后顺序访问，llvm::stable_sort是稳定排序的版本
 llvm::sort(visitedIndexesVec);
 for(int64_t i = 0, index = 0; i < static_cast<int_64>(a.size()); ++i) {
     if (index < static_cast<int64_t>(visitIndexesVec.size()) &&

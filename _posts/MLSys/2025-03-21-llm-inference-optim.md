@@ -91,7 +91,7 @@ Transformer的基本单位就是一层block，包含 Masked-Self-Attention + FFN
 
 ## MoE
 
-MoE 其实就是一组参数量更小的 FFN 结构，attention 的结果将通过 router network 挑选出 两组 “experts”(即参数量更小的 FFN）来分别处理该 token，并通过加法方式融合两组 “experts” 的输出。
+MoE 其实就是一组参数量更小的 FFN 结构，attention 的结果将通过 gate network 挑选出 两组 “experts”(即参数量更小的 FFN）来分别处理该 token，并通过加法方式融合两组 “experts” 的输出。
 
 ![transformer_block](/assets/img/blog/img_llm_inference_optim/moe.png)
 
