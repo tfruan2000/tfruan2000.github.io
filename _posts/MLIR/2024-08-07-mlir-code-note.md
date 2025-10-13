@@ -5139,6 +5139,8 @@ mlir/include/mlir/Transforms/RegionUtils.h
 
 region包含若干个block，一般linalgOp都包含一个region
 
+## 接口
+
 - bool hasOneBlock() 常用来判断region内只有一个block，取Block的时候用 `a.front()`
 
 - getUsedValuesDefinedAbove(MutableArrayRef<Region> regions, SetVector<Value> &values) 收集在regions中使用，但不在region中的blockArg上定义的Value，将其放入values
@@ -5314,6 +5316,64 @@ static void foldBarrierInFunc(gpu::FuncOp func) {
   for (auto barrierOp : opsToCombine) {
     rewriter.eraseOp(barrierOp);
   }
+}
+```
+
+## inline region
+
+若需要创建新 resTys 的 op，还需要将原先的 region 给转移
+
+- if op
+
+```cpp
+bool hasElseRegion = !op.getElseRegion().empty();
+auto ifOp = rewriter.create<scf::IfOp>(loc, newResultTypes,
+                                       op.getCondition(), hasElseRegion);
+// Inline if region and legalize yield op.
+rewriter.inlineRegionBefore(op.getThenRegion(),
+                            &ifOp.getThenRegion().back());
+rewriter.eraseBlock(&ifOp.getThenRegion().back());
+Block *thenBlock = &(ifOp.getThenRegion().front());
+// legalizeYieldOp 用于保证 res 合法
+legalizeYieldOp(loc, rewriter, thenBlock);
+if (hasElseRegion) {
+  rewriter.inlineRegionBefore(op.getElseRegion(),
+                              &ifOp.getElseRegion().back());
+  rewriter.eraseBlock(&ifOp.getElseRegion().back());
+  Block *elseBlock = &(ifOp.getElseRegion().front());
+  legalizeYieldOp(loc, rewriter, elseBlock);
+}
+```
+
+- for op
+
+```cpp
+auto forOp = rewriter.create<scf::ForOp>(loc, lb, ub, st, newInits);
+// Clone inner op in region.
+Block *oldBlock = &(op.getRegion().front());
+Block *newBlock = &(forOp.getRegion().front());
+rewriter.setInsertionPointToStart(newBlock);
+IRMapping mapping;
+for (const auto &pair : llvm::zip(op.getRegion().getArguments(),
+                                  forOp.getRegion().getArguments())) {
+  Value oldBbArg = std::get<0>(pair);
+  // 由于 iter_args type 改变，所以 newRegion 的 bbarg type 也会改变，所以需要对应进行修改
+  Value newBbArg = legalizeVals(std::get<1>(pair));
+  mapping.map(oldBbArg, newBbArg);
+}
+if (op.getRegionIterArgs().empty()) {
+  // If there is iter_args, the builder of scf.for will usually implicitly
+  // add a scf.yield operation with no operands for you to ensure the
+  // validity of the IR. If we clone the terminator of the block at this
+  // time, there would be two yields in the block.
+  for (Operation &operation : oldBlock->without_terminator()) {
+    rewriter.clone(operation, mapping);
+  }
+} else {
+  for (Operation &operation : *oldBlock) {
+    rewriter.clone(operation, mapping);
+  }
+  legalizeYieldOp(loc, rewriter, newBlock);
 }
 ```
 
